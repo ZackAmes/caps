@@ -28,9 +28,8 @@ pub mod actions {
     use caps::models::set::{ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait, Set};
     use caps::helpers::{
         get_piece_locations, get_active_effects, update_end_of_turn_effects,
-        get_dicts_from_array, process_actions,
+        get_dicts_from_array, process_actions, get_active_effects_from_array,
     };
-    use caps::simulate_helpers::get_active_effects_from_array;
     use core::dict::{Felt252DictTrait};
 
     use dojo::model::{ModelStorage};
@@ -270,7 +269,6 @@ pub mod actions {
             );
 
             let (mut locations, mut keys) = get_piece_locations(ref game, @world);
-            let mut set = world.read_model(0);
 
             let caller = get_caller_address();
 
@@ -290,7 +288,6 @@ pub mod actions {
                 ref start_of_turn_effects,
                 ref move_step_effects,
                 ref end_of_turn_effects,
-                ref set,
                 caller,
             );
             game = new_game;
@@ -370,7 +367,6 @@ pub mod actions {
             //hard to remove when neccesary we still need to figure out how to handle the sets when
             //running in wasm anyways
             let mut world = self.world(@"caps");
-            let mut set = world.read_model(*caps[0].set_id);
             let mut effects = effects.unwrap_or(ArrayTrait::new());
             let mut game = game;
             let mut turn = turn;
@@ -406,7 +402,6 @@ pub mod actions {
                 ref start_of_turn_effects,
                 ref move_step_effects,
                 ref end_of_turn_effects,
-                ref set,
                 caller,
             );
 

@@ -11,7 +11,6 @@ migrate = "sozo build && sozo migrate"                      # scarb run migrate
 
 [dependencies]
 dojo = { git = "https://github.com/dojoengine/dojo", tag = "v1.8.0" }
-caps_core = { path = "../core" }
 starknet = "2.13"
 
 [[target.starknet-contract]]

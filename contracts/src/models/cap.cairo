@@ -1,7 +1,7 @@
 use caps::helpers::{clone_dicts, get_dicts_from_array};
 use caps::models::effect::{Effect};
 use caps::models::game::{Game, Vec2};
-use caps::models::set::{ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait, Set};
+use caps::sets::set_zero::get_cap_type;
 
 use core::dict::Felt252Dict;
 use starknet::ContractAddress;
@@ -206,9 +206,8 @@ pub impl CapImpl of CapTrait {
         valid
     }
 
-    fn get_cap_type(self: @Cap, ref set: Set) -> Option<CapType> {
-        let dispatcher = ISetInterfaceDispatcher { contract_address: set.address };
-        dispatcher.get_cap_type(*self.cap_type)
+    fn get_cap_type(self: @Cap) -> Option<CapType> {
+        get_cap_type(*self.cap_type)
     }
 
     fn get_position(self: @Cap) -> Option<Vec2> {
@@ -226,12 +225,9 @@ pub impl CapImpl of CapTrait {
         ref self: Cap,
         target: Vec2,
         ref game: Game,
-        set: @Set,
         ref locations: Felt252Dict<u64>,
         ref keys: Felt252Dict<Nullable<Cap>>,
     ) -> (Game, Array<Effect>, Felt252Dict<u64>, Felt252Dict<Nullable<Cap>>) {
-        let dispatcher = ISetInterfaceDispatcher { contract_address: *set.address };
-        let game_clone = game.clone();
         let mut caps_array: Array<Cap> = ArrayTrait::new();
         let mut i = 0;
         while i < game.caps_ids.len() {
@@ -239,8 +235,10 @@ pub impl CapImpl of CapTrait {
             caps_array.append(cap);
             i += 1;
         };
-        let (new_game, new_effects, new_caps) = dispatcher
-            .activate_ability(self, target, game_clone, caps_array);
+        let mut cap_type = get_cap_type(self.cap_type).unwrap();
+        let (new_game, new_effects, new_caps) = caps::sets::set_zero::use_ability(
+            ref self, ref cap_type, target, ref game, ref locations, ref keys,
+        );
         let (new_locations, new_keys) = get_dicts_from_array(@new_caps);
         (new_game, new_effects, new_locations, new_keys)
     }

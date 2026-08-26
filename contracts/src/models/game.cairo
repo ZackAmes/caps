@@ -110,10 +110,9 @@ pub impl GameImpl of GameTrait {
         let mut two_found = false;
         let mut one_tower_found = false;
         let mut two_tower_found = false;
-        let mut set = world.read_model(0);
         while i < self.caps_ids.len() {
             let cap: Cap = world.read_model(*self.caps_ids[i]);
-            let cap_type = cap.get_cap_type(ref set).unwrap();
+            let cap_type = cap.get_cap_type().unwrap();
             if cap.dmg_taken >= cap_type.base_health {
                 i += 1;
                 continue;

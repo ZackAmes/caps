@@ -9,6 +9,10 @@ pub mod models {
     pub mod set;
 }
 
+pub mod logic {
+    pub mod helpers;
+    pub mod process;
+}
 
 pub mod sets {
     pub mod set_zero;
@@ -19,6 +23,4 @@ pub mod tests {
 }
 
 pub mod helpers;
-pub mod simulate_helpers;
 pub mod planetelo;
-pub mod conversions;

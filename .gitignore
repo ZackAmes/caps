@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Smithers
+.smithers/
+smithers.db
+smithers.db-shm
+smithers.db-wal
+
+# Build artifacts
+target/
+dist/
+build/
+pkg/
+*.sierra
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Dojo manifests (generated)
+manifest_*.json

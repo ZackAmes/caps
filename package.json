@@ -1,0 +1,6 @@
+{
+  "dependencies": {},
+  "devDependencies": {
+    "@smthrs/pi-plugin": "^0.35.0"
+  }
+}
