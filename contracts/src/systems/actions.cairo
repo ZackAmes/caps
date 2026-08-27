@@ -1,234 +1,147 @@
-use caps::models::game::{Game, Action};
-use caps::models::cap::{Cap, CapType};
-use caps::models::effect::{Effect};
+use caps::models::game::{Game, Action, Vec2};
+use caps::models::cap::{Cap, Location};
 use starknet::ContractAddress;
-// define the interface
+use dojo::world::WorldStorage;
+use dojo::model::ModelStorage;
+
 #[starknet::interface]
 pub trait IActions<T> {
-    fn create_game(
-        ref self: T, p1: ContractAddress, p2: ContractAddress, p1_team: u16, p2_team: u16,
-    ) -> u64;
+    /// Creates a new game. The caller is player1; `p2` is the opponent.
+    fn create_game(ref self: T, p2: ContractAddress) -> u64;
+    /// Submit a list of actions for the current turn player.
     fn take_turn(ref self: T, game_id: u64, turn: Array<Action>);
-    fn get_game(self: @T, game_id: u64) -> Option<(Game, Span<Cap>, Span<Effect>)>;
-    fn get_cap_data(self: @T, set_id: u64, cap_type: u16) -> Option<CapType>;
-    fn simulate_turn(
-        self: @T, game: Game, caps: Array<Cap>, effects: Option<Array<Effect>>, turn: Array<Action>,
-    ) -> (Game, Span<Effect>, Span<Cap>);
+    /// Fetch the game plus its live caps.
+    fn get_game(self: @T, game_id: u64) -> Option<(Game, Span<Cap>)>;
 }
 
+/// Re-reads every cap referenced by the game from the world.
+fn alive_caps(world: @WorldStorage, game: @Game) -> Array<Cap> {
+    let mut caps = ArrayTrait::new();
+    let mut i: usize = 0;
+    while i < game.caps_ids.len() {
+        let cap: Cap = world.read_model(*game.caps_ids[i]);
+        caps.append(cap);
+        i += 1;
+    };
+    caps
+}
 
-// dojo decorator
+/// Returns the index (into `caps`) of a non-dead cap at `pos`, or `caps.len()` if empty.
+fn index_at(caps: @Array<Cap>, pos: Vec2) -> usize {
+    let mut i: usize = 0;
+    while i < caps.len() {
+        let cap: Cap = *caps.at(i);
+        match cap.location {
+            Location::Board(v) => { if v.x == pos.x && v.y == pos.y { return i; } },
+            _ => {},
+        }
+        i += 1;
+    };
+    caps.len()
+}
+
+/// Returns the index of the cap with `id`, or `len()` if not found.
+fn index_of_id(caps: @Array<Cap>, id: u64) -> usize {
+    let mut i: usize = 0;
+    while i < caps.len() {
+        let cap: Cap = *caps.at(i);
+        if cap.id == id {
+            return i;
+        }
+        i += 1;
+    };
+    caps.len()
+}
+
 #[dojo::contract]
 pub mod actions {
-    use super::{IActions};
+    use super::{IActions, alive_caps, index_at, index_of_id};
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
-    use caps::models::game::{Vec2, Game, Global, GameTrait, Action};
-    use caps::models::effect::{Effect};
-    use caps::models::cap::{Cap, CapType, Location};
-    use caps::models::set::{ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait, Set};
-    use caps::helpers::{
-        get_piece_locations, get_active_effects, update_end_of_turn_effects,
-        get_dicts_from_array, process_actions, get_active_effects_from_array,
+    use caps::models::game::{Game, Global, Action, Vec2, ActionType};
+    use caps::models::cap::{
+        Cap, Location, cap_stats, dist, in_bounds, get_position, BOARD_Y,
     };
-    use core::dict::{Felt252DictTrait};
+    use dojo::model::ModelStorage;
 
-    use dojo::model::{ModelStorage};
-    use dojo::event::EventStorage;
-
-    #[derive(Copy, Drop, Serde)]
-    #[dojo::event]
-    pub struct Moved {
-        #[key]
-        pub player: ContractAddress,
-        #[key]
-        pub game_id: u64,
-        #[key]
-        pub turn_number: u64,
-        pub turn: Span<Action>,
-    }
+    pub const TEAM_SIZE: u8 = 6;
 
     #[abi(embed_v0)]
     impl ActionsImpl of IActions<ContractState> {
-        fn create_game(
-            ref self: ContractState,
-            p1: ContractAddress,
-            p2: ContractAddress,
-            p1_team: u16,
-            p2_team: u16,
-        ) -> u64 {
-            // Get the default world.
+        fn create_game(ref self: ContractState, p2: ContractAddress) -> u64 {
             let mut world = self.world_default();
-
             let mut global: Global = world.read_model(0);
 
             let game_id = global.games_counter + 1;
             global.games_counter = game_id;
-            world.write_model(@global);
+
+            let p1: felt252 = get_caller_address().into();
+            let p2: felt252 = p2.into();
 
             let mut game = Game {
                 id: game_id,
-                player1: p1.into(),
-                player2: p2.into(),
-                caps_ids: ArrayTrait::new(),
+                player1: p1,
+                player2: p2,
                 turn_count: 0,
                 over: false,
-                effect_ids: ArrayTrait::new(),
-                last_action_timestamp: get_block_timestamp(),
+                winner: 0,
+                caps_ids: ArrayTrait::new(),
+                last_action_timestamp: 0,
             };
 
-            let p1_types = array![
-                0 + p1_team, 4 + p1_team, 8 + p1_team, 12 + p1_team, 16 + p1_team, 20 + p1_team,
-            ];
-            let p2_types = array![
-                0 + p2_team, 4 + p2_team, 8 + p2_team, 12 + p2_team, 16 + p2_team, 20 + p2_team,
-            ];
+            let mut cap_counter = global.cap_counter;
+            let p1_home: u8 = 0;
+            let p2_home: u8 = BOARD_Y - 1;
 
-            let p1_cap1 = Cap {
-                id: global.cap_counter + 1,
-                owner: p1.into(),
-                location: Location::Board(Vec2 { x: 2, y: 0 }),
-                set_id: 0,
-                cap_type: *p1_types[0],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-            let p1_cap2 = Cap {
-                id: global.cap_counter + 2,
-                owner: p1.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p1_types[1],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
+            let mut i: u8 = 0;
+            while i < TEAM_SIZE {
+                let cap_type: u8 = if i == 0 {
+                    0
+                } else if i == 1 {
+                    1
+                } else if i == 2 {
+                    2
+                } else if i == 3 {
+                    3
+                } else {
+                    1
+                };
+                let (hp, _, _, _) = cap_stats(cap_type);
 
-            let p1_cap3 = Cap {
-                id: global.cap_counter + 3,
-                owner: p1.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p1_types[2],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
+                // p1 cap
+                cap_counter += 1;
+                let p1_loc = if i == 0 { Location::Board(Vec2 { x: 1, y: p1_home }) } else {
+                    Location::Bench
+                };
+                let cap1 = Cap {
+                    id: cap_counter,
+                    owner: p1,
+                    cap_type: cap_type,
+                    location: p1_loc,
+                    health: hp,
+                };
+                world.write_model(@cap1);
+                game.caps_ids.append(cap1.id);
 
-            let p1_cap4 = Cap {
-                id: global.cap_counter + 4,
-                owner: p1.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p1_types[3],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-            let p1_cap5 = Cap {
-                id: global.cap_counter + 5,
-                owner: p1.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p1_types[4],
-                dmg_taken: 0,
-                shield_amt: 0,
+                // p2 cap
+                cap_counter += 1;
+                let p2_loc = if i == 0 { Location::Board(Vec2 { x: 1, y: p2_home }) } else {
+                    Location::Bench
+                };
+                let cap2 = Cap {
+                    id: cap_counter,
+                    owner: p2,
+                    cap_type: cap_type,
+                    location: p2_loc,
+                    health: hp,
+                };
+                world.write_model(@cap2);
+                game.caps_ids.append(cap2.id);
+
+                i += 1;
             };
 
-            let p1_cap6 = Cap {
-                id: global.cap_counter + 6,
-                owner: p1.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p1_types[5],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            let p2_cap1 = Cap {
-                id: global.cap_counter + 7,
-                owner: p2.into(),
-                location: Location::Board(Vec2 { x: 2, y: 6 }),
-                set_id: 0,
-                cap_type: *p2_types[0],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            let p2_cap2 = Cap {
-                id: global.cap_counter + 8,
-                owner: p2.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p2_types[1],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            let p2_cap3 = Cap {
-                id: global.cap_counter + 9,
-                owner: p2.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p2_types[2],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            let p2_cap4 = Cap {
-                id: global.cap_counter + 10,
-                owner: p2.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p2_types[3],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            let p2_cap5 = Cap {
-                id: global.cap_counter + 11,
-                owner: p2.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p2_types[4],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            let p2_cap6 = Cap {
-                id: global.cap_counter + 12,
-                owner: p2.into(),
-                location: Location::Bench,
-                set_id: 0,
-                cap_type: *p2_types[5],
-                dmg_taken: 0,
-                shield_amt: 0,
-            };
-
-            game.add_cap(p1_cap1.id);
-            game.add_cap(p1_cap2.id);
-            game.add_cap(p1_cap3.id);
-            game.add_cap(p1_cap4.id);
-            game.add_cap(p1_cap5.id);
-            game.add_cap(p1_cap6.id);
-            game.add_cap(p2_cap1.id);
-            game.add_cap(p2_cap2.id);
-            game.add_cap(p2_cap3.id);
-            game.add_cap(p2_cap4.id);
-            game.add_cap(p2_cap5.id);
-            game.add_cap(p2_cap6.id);
-
-            global.cap_counter = global.cap_counter + 12;
-
+            global.cap_counter = cap_counter;
             world.write_model(@game);
-            world.write_model(@p1_cap1);
-            world.write_model(@p1_cap2);
-            world.write_model(@p1_cap3);
-            world.write_model(@p1_cap4);
-            world.write_model(@p1_cap5);
-            world.write_model(@p1_cap6);
-            world.write_model(@p2_cap1);
-            world.write_model(@p2_cap2);
-            world.write_model(@p2_cap3);
-            world.write_model(@p2_cap4);
-            world.write_model(@p2_cap5);
-            world.write_model(@p2_cap6);
             world.write_model(@global);
 
             game_id
@@ -236,292 +149,138 @@ pub mod actions {
 
         fn take_turn(ref self: ContractState, game_id: u64, turn: Array<Action>) {
             let mut world = self.world_default();
-
-            let mut turn = turn;
-
-            let clone = turn.clone();
             let mut game: Game = world.read_model(game_id);
 
-            let (over, _) = @game.check_over(@world);
-            if *over {
-                if !game.over {
-                    game.over = true;
-                    world.write_model(@game);
-                    return;
-                }
+            if game.over {
                 panic!("Game is over");
             }
 
-            if game.turn_count % 2 == 0 {
-                assert!(
-                    //temp to test without changing controllers constantly
-                    get_caller_address() == game.player1, "You are not the turn player, 1s turn",
-                );
-            } else if game.turn_count % 2 == 1 {
-                assert!(
-                    get_caller_address() == game.player2, "You are not the turn player, 2s turn",
-                );
-            } 
-
-            let (mut start_of_turn_effects, mut move_step_effects, mut end_of_turn_effects) =
-                get_active_effects(
-                ref game, @world,
-            );
-
-            let (mut locations, mut keys) = get_piece_locations(ref game, @world);
-
-            let caller = get_caller_address();
-
-            let (
-                new_game,
-                new_locations,
-                new_keys,
-                new_start_of_turn_effects,
-                new_move_step_effects,
-                new_end_of_turn_effects,
-            ) =
-                process_actions(
-                ref game,
-                ref turn,
-                locations,
-                ref keys,
-                ref start_of_turn_effects,
-                ref move_step_effects,
-                ref end_of_turn_effects,
-                caller,
-            );
-            game = new_game;
-            locations = new_locations;
-            keys = new_keys;
-            move_step_effects = new_move_step_effects;
-            end_of_turn_effects = new_end_of_turn_effects;
-
-            let (mut game, mut new_end_of_turn_effects, new_locations, new_keys) =
-                update_end_of_turn_effects(
-                ref game, ref end_of_turn_effects, locations, keys,
-            );
-            end_of_turn_effects = new_end_of_turn_effects;
-            locations = new_locations;
-            keys = new_keys;
-
-            let mut i = 0;
-            while i < game.caps_ids.len() {
-                let cap_id = *game.caps_ids[i];
-                let cap = keys.get(cap_id.into()).deref();
-                let cap_type = self.get_cap_data(cap.set_id, cap.cap_type).unwrap();
-                if cap.dmg_taken >= cap_type.base_health {
-                    game.remove_cap(cap_id);
-                    world.erase_model(@cap);
-                } else {
-                    world.write_model(@cap);
-                }
-                i += 1;
-            };
-
-            let mut new_effect_ids: Array<u64> = ArrayTrait::new();
-            for effect in new_start_of_turn_effects {
-                if effect.remaining_triggers > 0 {
-                    new_effect_ids.append(effect.effect_id);
-                    world.write_model(@effect);
-                }
-            };
-            for effect in move_step_effects {
-                if effect.remaining_triggers > 0 {
-                    new_effect_ids.append(effect.effect_id);
-                    world.write_model(@effect);
-                }
-            };
-            for effect in end_of_turn_effects {
-                if effect.remaining_triggers > 0 {
-                    new_effect_ids.append(effect.effect_id);
-                    world.write_model(@effect);
-                }
-            };
-
-            game.last_action_timestamp = get_block_timestamp();
-            game.turn_count = game.turn_count + 1;
-            game.effect_ids = new_effect_ids;
-            let (over, _) = @game.check_over(@world);
-            game.over = *over;
-            world.write_model(@game);
-
-            world
-                .emit_event(
-                    @Moved {
-                        player: get_caller_address(),
-                        game_id: game_id,
-                        turn_number: game.turn_count - 1,
-                        turn: clone.span(),
-                    },
-                );
-        }
-
-        fn simulate_turn(
-            self: @ContractState,
-            game: Game,
-            caps: Array<Cap>,
-            effects: Option<Array<Effect>>,
-            turn: Array<Action>,
-        ) -> (Game, Span<Effect>, Span<Cap>) {
-            //the only world read is for the set. This is just for convenience and shouldn't be too
-            //hard to remove when neccesary we still need to figure out how to handle the sets when
-            //running in wasm anyways
-            let mut world = self.world(@"caps");
-            let mut effects = effects.unwrap_or(ArrayTrait::new());
-            let mut game = game;
-            let mut turn = turn;
-
-            let (mut start_of_turn_effects, mut move_step_effects, mut end_of_turn_effects) =
-                get_active_effects_from_array(
-                @game, @effects,
-            );
-
-            let mut caller = 0.try_into().unwrap();
-
-            if game.turn_count % 2 == 0 {
-                caller = game.player1;
+            let caller: felt252 = get_caller_address().into();
+            let turn_player: felt252 = if game.turn_count % 2 == 0 {
+                game.player1
             } else {
-                caller = game.player2;
-            }
+                game.player2
+            };
+            assert!(caller == turn_player, "Not your turn");
 
-            let (mut locations, mut keys) = get_dicts_from_array(@caps);
+            let mut i: usize = 0;
+            while i < turn.len() {
+                let action: Action = *turn.at(i);
 
-            let (
-                new_game,
-                new_locations,
-                new_keys,
-                new_start_of_turn_effects,
-                new_move_step_effects,
-                new_end_of_turn_effects,
-            ) =
-                process_actions(
-                ref game,
-                ref turn,
-                locations,
-                ref keys,
-                ref start_of_turn_effects,
-                ref move_step_effects,
-                ref end_of_turn_effects,
-                caller,
-            );
+                let caps = alive_caps(@world, @game);
+                let act_idx = index_of_id(@caps, action.cap_id);
+                assert!(act_idx < caps.len(), "Cap not found");
+                let mut cap: Cap = *caps.at(act_idx);
+                assert!(cap.owner == caller, "Not your cap");
+                assert!(cap.location != Location::Dead, "Cap is dead");
 
-            game = new_game;
-            locations = new_locations;
-            keys = new_keys;
-            move_step_effects = new_move_step_effects;
-            end_of_turn_effects = new_end_of_turn_effects;
-
-            let (mut game, mut new_end_of_turn_effects, new_locations, new_keys) =
-                update_end_of_turn_effects(
-                ref game, ref end_of_turn_effects, locations, keys,
-            );
-
-            end_of_turn_effects = new_end_of_turn_effects;
-            locations = new_locations;
-            keys = new_keys;
-
-            let mut final_caps: Array<Cap> = ArrayTrait::new();
-            let mut i = 0;
-            let mut one_found = false;
-            let mut two_found = false;
-            let mut one_tower_found = false;
-            let mut two_tower_found = false;
-            while i < game.caps_ids.len() {
-                let cap_id = *game.caps_ids[i];
-                let cap = keys.get(cap_id.into()).deref();
-                let cap_type = self.get_cap_data(cap.set_id, cap.cap_type).unwrap();
-                if cap.dmg_taken >= cap_type.base_health {
-                    game.remove_cap(cap_id);
-                } else {
-                    if cap.owner == (game.player1).into() {
-                        //todo: better way to tell if it's a tower
-                        if cap.cap_type < 4 {
-                            one_tower_found = true;
+                match action.action_type {
+                    ActionType::Play(pos) => {
+                        assert!(in_bounds(pos), "Out of bounds");
+                        assert!(cap.location == Location::Bench, "Not on bench");
+                        assert!(index_at(@caps, pos) == caps.len(), "Cell occupied");
+                        cap.location = Location::Board(pos);
+                        world.write_model(@cap);
+                    },
+                    ActionType::Move(pos) => {
+                        assert!(in_bounds(pos), "Out of bounds");
+                        let (_, _, _, move_range) = cap_stats(cap.cap_type);
+                        assert!(cap.location != Location::Bench, "Not on board");
+                        let cur = get_position(@cap).unwrap();
+                        assert!(index_at(@caps, pos) == caps.len(), "Cell occupied");
+                        let d = dist(cur, pos);
+                        assert!(
+                            d >= 1 && d <= move_range.into(), "Move out of range:",
+                        );
+                        cap.location = Location::Board(pos);
+                        world.write_model(@cap);
+                    },
+                    ActionType::Attack(pos) => {
+                        assert!(in_bounds(pos), "Out of bounds");
+                        let (_, atk, attack_range, _) = cap_stats(cap.cap_type);
+                        assert!(cap.location != Location::Bench, "Not on board");
+                        let cur = get_position(@cap).unwrap();
+                        assert!(dist(cur, pos) <= attack_range.into(), "Attack out of range");
+                        let tgt_idx = index_at(@caps, pos);
+                        assert!(tgt_idx < caps.len(), "No target there");
+                        let mut target: Cap = *caps.at(tgt_idx);
+                        assert!(target.id != cap.id, "Cannot attack self");
+                        assert!(target.owner != caller, "Cannot attack your own cap");
+                        let dmg: u16 = atk;
+                        if target.health > dmg {
+                            target.health -= dmg;
+                        } else {
+                            target.health = 0;
                         }
-                        one_found = true;
-                    } else if cap.owner == (game.player2).into() {
-                        if cap.cap_type < 4 {
-                            two_tower_found = true;
+                        if target.health == 0 {
+                            target.location = Location::Dead;
                         }
-                        two_found = true;
-                    }
-                    final_caps.append(cap);
+                        world.write_model(@target);
+                    },
                 }
+
                 i += 1;
             };
 
-            if !one_found || !one_tower_found {
+            // Prune dead caps and resolve the winner.
+            let mut dead_count: Array<u64> = ArrayTrait::new();
+            let mut p1_alive = false;
+            let mut p2_alive = false;
+            let mut new_ids: Array<u64> = ArrayTrait::new();
+            let mut j: usize = 0;
+            while j < game.caps_ids.len() {
+                let cap_id = *game.caps_ids[j];
+                let cap: Cap = world.read_model(cap_id);
+                match cap.location {
+                    Location::Dead => { dead_count.append(cap_id); },
+                    _ => {
+                        new_ids.append(cap_id);
+                        if cap.owner == game.player1 {
+                            p1_alive = true;
+                        } else if cap.owner == game.player2 {
+                            p2_alive = true;
+                        }
+                    },
+                }
+                j += 1;
+            };
+            game.caps_ids = new_ids;
+
+            if p1_alive && !p2_alive {
                 game.over = true;
-            }
-            if !two_found || !two_tower_found {
+                game.winner = game.player1;
+            } else if p2_alive && !p1_alive {
                 game.over = true;
+                game.winner = game.player2;
+            } else if !p1_alive && !p2_alive {
+                game.over = true;
+                game.winner = 0;
             }
-            let mut final_effects: Array<Effect> = ArrayTrait::new();
-            let mut new_effect_ids: Array<u64> = ArrayTrait::new();
-            for effect in new_start_of_turn_effects {
-                if effect.remaining_triggers > 0 {
-                    new_effect_ids.append(effect.effect_id);
-                    final_effects.append(effect);
-                }
-            };
-            for effect in move_step_effects {
-                if effect.remaining_triggers > 0 {
-                    new_effect_ids.append(effect.effect_id);
-                    final_effects.append(effect);
-                }
-            };
-            for effect in end_of_turn_effects {
-                if effect.remaining_triggers > 0 {
-                    new_effect_ids.append(effect.effect_id);
-                    final_effects.append(effect);
-                }
-            };
 
             game.last_action_timestamp = get_block_timestamp();
-            game.turn_count = game.turn_count + 1;
-            game.effect_ids = new_effect_ids;
-
-            (game, final_effects.span(), final_caps.span())
+            game.turn_count += 1;
+            world.write_model(@game);
         }
 
-        fn get_game(self: @ContractState, game_id: u64) -> Option<(Game, Span<Cap>, Span<Effect>)> {
-            let mut world = self.world_default();
+        fn get_game(self: @ContractState, game_id: u64) -> Option<(Game, Span<Cap>)> {
+            let world = self.world_default();
             let game: Game = world.read_model(game_id);
-            if game.player1 == 0.try_into().unwrap() {
+            if game.player1 == 0 {
                 return Option::None;
             }
-            let mut i = 0;
+            let mut i: usize = 0;
             let mut caps: Array<Cap> = ArrayTrait::new();
             while i < game.caps_ids.len() {
                 let cap: Cap = world.read_model(*game.caps_ids[i]);
                 caps.append(cap);
                 i += 1;
             };
-
-            let mut i: u64 = 0;
-            let mut effects: Array<Effect> = ArrayTrait::new();
-            while i < game.effect_ids.len().into() {
-                let effect: Effect = world.read_model((game_id, i));
-                if effect.remaining_triggers > 0 {
-                    effects.append(effect);
-                }
-                i += 1;
-            };
-            Option::Some((game, caps.span(), effects.span()))
-        }
-
-        fn get_cap_data(self: @ContractState, set_id: u64, cap_type: u16) -> Option<CapType> {
-            let mut world = self.world_default();
-            let set: Set = world.read_model(set_id);
-            let dispatcher = ISetInterfaceDispatcher { contract_address: set.address };
-            dispatcher.get_cap_type(cap_type)
+            Option::Some((game, caps.span()))
         }
     }
 
     #[generate_trait]
     impl InternalImpl of InternalTrait {
-        /// Use the default namespace "dojo_starter". This function is handy since the ByteArray
-        /// can't be const.
         fn world_default(self: @ContractState) -> dojo::world::WorldStorage {
             self.world(@"caps")
         }

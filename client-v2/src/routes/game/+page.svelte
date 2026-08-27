@@ -1,544 +1,281 @@
 <script lang="ts">
-    import { Canvas } from '@threlte/core';
-    import { T } from '@threlte/core';
-    import { onMount, onDestroy } from 'svelte';
-    import { createMockGameState, type BoardPiece, type HandPiece, type GameState } from '$lib/game/gameState';
-    import InteractiveBoard from '$lib/game/InteractiveBoard.svelte';
-    import HandBar from '$lib/game/HandBar.svelte';
+    import { onMount } from 'svelte';
+    import {
+        connect, isConnected, getAccount, createGame, takeTurn, getGame,
+        type ChainGame, type ChainCap, type TurnAction, CAP_STATS,
+    } from '$lib/dojo/client';
 
-    let gameState = $state<GameState>(createMockGameState());
-    let selectedHandIndex = $state<number | null>(null);
-    let selectedBoardPiece = $state<BoardPiece | null>(null);
-    let pendingAction = $state<'play' | 'move' | 'attack' | 'ability' | 'retreat' | null>(null);
-    let actionMenuPosition = $state<{ x: number; y: number } | null>(null);
-    
-    // Drag state for hand pieces
-    let draggingHandPiece = $state<{ index: number; piece: HandPiece; x: number; y: number } | null>(null);
+    let account = $state<string | null>(null);
+    let status = $state<string>('Disconnected');
+    let errorMsg = $state<string | null>(null);
 
-    function getTilePosition(x: number, y: number): [number, number, number] {
-        const GRID_WIDTH = 3;
-        const GRID_HEIGHT = 7;
-        const TILE_SIZE = 1.2;
-        const TILE_SPACING = 0.15;
-        const offsetX = -(GRID_WIDTH - 1) * (TILE_SIZE + TILE_SPACING) / 2;
-        const offsetZ = -(GRID_HEIGHT - 1) * (TILE_SIZE + TILE_SPACING) / 2;
-        
-        return [
-            offsetX + x * (TILE_SIZE + TILE_SPACING),
-            0,
-            offsetZ + y * (TILE_SIZE + TILE_SPACING)
-        ];
-    }
+    let opponent = $state('');
+    let gameIdInput = $state('1');
+    let game: ChainGame | null = $state(null);
 
-    function handleHandPieceClick(index: number) {
-        // Only handle click if not dragging
-        if (!draggingHandPiece) {
-            if (selectedHandIndex === index) {
-                selectedHandIndex = null;
-                pendingAction = null;
-            } else {
-                selectedHandIndex = index;
-                selectedBoardPiece = null;
-                pendingAction = 'play';
-            }
+    // Turn editor
+    let selectedCapId = $state<number | null>(null);
+    let pendingMode = $state<'move' | 'attack' | 'play' | null>(null);
+    let queuedActions: TurnAction[] = $state([]);
+    let committing = $state(false);
+
+    const W = 3;
+    const H = 7;
+
+    async function handleConnect() {
+        errorMsg = null;
+        try {
+            const acc = await connect();
+            account = acc.address;
+            status = 'Connected';
+        } catch (e: any) {
+            errorMsg = e?.message ?? String(e);
         }
     }
 
-    function handleHandPieceDragStart(index: number, piece: HandPiece, event: PointerEvent) {
-        if (gameState.energy < piece.cost) return; // Can't afford
-        
-        draggingHandPiece = {
-            index,
-            piece,
-            x: event.clientX,
-            y: event.clientY
-        };
-        event.preventDefault();
-    }
-
-
-    function handleHandPieceDrop(x: number, y: number) {
-        if (!draggingHandPiece) return;
-        
-        const { index, piece } = draggingHandPiece;
-        
-        // Check if we can afford it
-        if (gameState.energy >= piece.cost) {
-            // Check if tile is empty
-            const tileEmpty = !gameState.boardPieces.some(p => p.x === x && p.y === y);
-            
-            if (tileEmpty) {
-                const newPiece: BoardPiece = {
-                    id: Date.now(),
-                    x,
-                    y,
-                    owner: 'player1',
-                    type: piece.type,
-                    health: piece.health,
-                    maxHealth: piece.maxHealth,
-                    attack: piece.attack,
-                    canMove: true,
-                    canAttack: true,
-                    canUseAbility: true
-                };
-                gameState.boardPieces.push(newPiece);
-                gameState.energy -= piece.cost;
-                gameState.hand = gameState.hand.filter((_, i) => i !== index);
-            }
-        }
-        
-        draggingHandPiece = null;
-    }
-
-    function handleTileClick(x: number, y: number) {
-        // Check if there's a piece at this position
-        const pieceAtPosition = gameState.boardPieces.find(p => p.x === x && p.y === y && p.owner === 'player1');
-        
-        if (pieceAtPosition) {
-            // Select this piece
-            if (selectedBoardPiece?.id === pieceAtPosition.id) {
-                selectedBoardPiece = null;
-                pendingAction = null;
-                actionMenuPosition = null;
-            } else {
-                selectedBoardPiece = pieceAtPosition;
-                selectedHandIndex = null;
-                pendingAction = null;
-                // Calculate position for action menu (will be shown above piece on mobile)
-                const [posX, , posZ] = getTilePosition(x, y);
-                actionMenuPosition = { x: posX, y: posZ };
-            }
-        } else if (selectedHandIndex !== null && pendingAction === 'play') {
-            // Try to play a piece
-            const handPiece = gameState.hand[selectedHandIndex];
-            if (handPiece && gameState.energy >= handPiece.cost) {
-                const newPiece: BoardPiece = {
-                    id: Date.now(),
-                    x,
-                    y,
-                    owner: 'player1',
-                    type: handPiece.type,
-                    health: handPiece.health,
-                    maxHealth: handPiece.maxHealth,
-                    attack: handPiece.attack,
-                    canMove: true,
-                    canAttack: true,
-                    canUseAbility: true
-                };
-                gameState.boardPieces.push(newPiece);
-                gameState.energy -= handPiece.cost;
-                gameState.hand = gameState.hand.filter((_, i) => i !== selectedHandIndex);
-                selectedHandIndex = null;
-                pendingAction = null;
-            }
-            } else if (selectedBoardPiece && pendingAction) {
-            // Execute action
-            if (pendingAction === 'move') {
-                const dx = Math.abs(x - selectedBoardPiece.x);
-                const dy = Math.abs(y - selectedBoardPiece.y);
-                if ((dx === 1 && dy === 0) || (dx === 0 && dy === 1)) {
-                    const piece = gameState.boardPieces.find(p => p.id === selectedBoardPiece!.id);
-                    if (piece) {
-                        piece.x = x;
-                        piece.y = y;
-                        piece.canMove = false;
-                    }
-                    selectedBoardPiece = null;
-                    pendingAction = null;
-                    actionMenuPosition = null;
-                }
-            } else if (pendingAction === 'attack') {
-                const targetPiece = gameState.boardPieces.find(p => p.x === x && p.y === y && p.owner === 'player2');
-                if (targetPiece && selectedBoardPiece) {
-                    targetPiece.health -= selectedBoardPiece.attack;
-                    if (targetPiece.health <= 0) {
-                        gameState.boardPieces = gameState.boardPieces.filter(p => p.id !== targetPiece.id);
-                    }
-                    const piece = gameState.boardPieces.find(p => p.id === selectedBoardPiece!.id);
-                    if (piece) {
-                        piece.canAttack = false;
-                    }
-                    selectedBoardPiece = null;
-                    pendingAction = null;
-                    actionMenuPosition = null;
-                }
-            }
+    async function handleCreate() {
+        errorMsg = null;
+        try {
+            const acc = getAccount();
+            // create_game needs the connected account as p1; opponent input is p2.
+            const opp = opponent.trim();
+            if (!opp) throw new Error('Enter an opponent address');
+            await createGame(opp);
+            status = 'Game created';
+            // refresh games listing via get_game using current counter
+            await refreshGames();
+        } catch (e: any) {
+            errorMsg = e?.message ?? String(e);
         }
     }
 
-    function handleActionClick(action: 'move' | 'attack' | 'ability' | 'retreat') {
-        const piece = selectedBoardPiece;
-        if (!piece) return;
-
-        if (action === 'retreat') {
-            // Remove piece from board
-            gameState.boardPieces = gameState.boardPieces.filter(p => p.id !== piece.id);
-            selectedBoardPiece = null;
-            pendingAction = null;
-            actionMenuPosition = null;
-        } else {
-            pendingAction = action;
+    async function refreshGames() {
+        // simplest: try to load the requested game id
+        const id = Number(gameIdInput);
+        if (!Number.isNaN(id) && id > 0) {
+            await handleLoad();
         }
     }
 
-    function handlePieceClick(piece: BoardPiece) {
-        if (selectedBoardPiece?.id === piece.id) {
-            selectedBoardPiece = null;
-            pendingAction = null;
-            actionMenuPosition = null;
-        } else {
-            selectedBoardPiece = piece;
-            selectedHandIndex = null;
-            pendingAction = null;
-            const [tileX, , tileZ] = getTilePosition(piece.x, piece.y);
-            actionMenuPosition = { x: tileX, y: tileZ };
+    async function handleLoad() {
+        errorMsg = null;
+        try {
+            const id = Number(gameIdInput);
+            if (Number.isNaN(id) || id <= 0) throw new Error('Enter a valid game id');
+            game = await getGame(id);
+            if (!game) throw new Error(`Game ${id} not found`);
+            selectedCapId = null;
+            pendingMode = null;
+            status = `Loaded game ${id}`;
+        } catch (e: any) {
+            errorMsg = e?.message ?? String(e);
         }
     }
 
-    // Prevent default touch behaviors and handle drag tracking
-    onMount(() => {
-        const preventDefault = (e: TouchEvent) => {
-            if (e.touches.length > 1) {
-                e.preventDefault(); // Prevent pinch zoom
+    function myAddress(): string | null {
+        return account;
+    }
+
+    function isMyCap(c: ChainCap): boolean {
+        return account !== null && c.owner === account;
+    }
+
+    function isMyTurn(): boolean {
+        if (!game || !account) return false;
+        const turnPlayer = game.turnCount % 2 === 0 ? game.player1 : game.player2;
+        return turnPlayer === account;
+    }
+
+    function capAt(x: number, y: number): ChainCap | undefined {
+        return game?.caps.find(c => c.x === x && c.y === y) ?? undefined;
+    }
+
+    function benchCaps(): ChainCap[] {
+        return game?.caps.filter(c => c.x === null) ?? [];
+    }
+
+    function selectCap(id: number) {
+        if (selectedCapId === id) {
+            selectedCapId = null;
+            pendingMode = null;
+            return;
+        }
+        selectedCapId = id;
+        pendingMode = null;
+    }
+
+    function startMove() {
+        if (selectedCapId == null) return;
+        pendingMode = 'move';
+    }
+    function startAttack() {
+        if (selectedCapId == null) return;
+        pendingMode = 'attack';
+    }
+    function startPlay() {
+        if (selectedCapId == null) return;
+        pendingMode = 'play';
+    }
+
+    function onCellClick(x: number, y: number) {
+        const target = capAt(x, y);
+        if (selectedCapId == null) {
+            // select a friendly cap on this cell, or a bench cap
+            if (target && isMyCap(target)) {
+                selectCap(target.id);
             }
-        };
-
-        const preventScroll = (e: TouchEvent) => {
-            // Only prevent if we're not dragging a hand piece
-            if (!draggingHandPiece) {
-                e.preventDefault();
+            return;
+        }
+        if (pendingMode == null) {
+            if (target && isMyCap(target)) {
+                selectCap(target.id);
             }
-        };
+            return;
+        }
+        // queue an action for the selected cap toward (x,y)
+        if (target && isMyCap(target) && target.id !== selectedCapId) return;
+        // Move/Attack to friendly-only cells handled by contract; Play can target empty
+        const kindMap = { move: 'Move', attack: 'Attack', play: 'Play' } as const;
+        queuedActions = [...queuedActions, { capId: selectedCapId, kind: kindMap[pendingMode], x, y }];
+        status = `Queued ${pendingMode} → (${x},${y})`;
+        pendingMode = null;
+        selectedCapId = null;
+    }
 
-        document.addEventListener('touchmove', preventScroll, { passive: false });
-        document.addEventListener('touchstart', preventDefault, { passive: false });
-        document.body.style.overflow = 'hidden';
-        document.body.style.position = 'fixed';
-        document.body.style.width = '100%';
-        document.body.style.height = '100%';
+    function colorFor(c: ChainCap): string {
+        const palette = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf'];
+        const base = palette[(c.capType % palette.length + palette.length) % palette.length];
+        return account && c.owner === account ? base : '#9aa0a6';
+    }
 
-        const handlePointerMove = (event: PointerEvent) => {
-            if (draggingHandPiece) {
-                draggingHandPiece.x = event.clientX;
-                draggingHandPiece.y = event.clientY;
-            }
-        };
+    async function commitTurn() {
+        if (!game || queuedActions.length === 0) return;
+        errorMsg = null;
+        committing = true;
+        try {
+            await takeTurn(game.id, queuedActions);
+            queuedActions = [];
+            status = 'Turn submitted';
+            await handleLoad();
+        } catch (e: any) {
+            errorMsg = e?.message ?? String(e);
+        } finally {
+            committing = false;
+        }
+    }
 
-        const handlePointerUp = () => {
-            if (draggingHandPiece) {
-                draggingHandPiece = null;
-            }
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-
-        return () => {
-            document.removeEventListener('touchmove', preventScroll);
-            document.removeEventListener('touchstart', preventDefault);
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', handlePointerUp);
-            document.body.style.overflow = '';
-            document.body.style.position = '';
-            document.body.style.width = '';
-            document.body.style.height = '';
-        };
-    });
+    onMount(() => {});
 </script>
 
-<div class="game-container">
-    <div class="energy-bar">
-        <div class="energy-label">Energy</div>
-        <div class="energy-value">{gameState.energy} / {gameState.maxEnergy}</div>
-        <div class="energy-bar-fill" style="width: {(gameState.energy / gameState.maxEnergy) * 100}%"></div>
+<div class="wrap">
+    <h1>Caps</h1>
+
+    <div class="toolbar">
+        {#if !account}
+            <button onclick={handleConnect}>Connect Wallet</button>
+        {:else}
+            <span class="addr" title={account}>{account.slice(0, 6)}…{account.slice(-4)}</span>
+            <button onclick={handleConnect}>Reconnect</button>
+        {/if}
     </div>
 
-    <div class="canvas-wrapper">
-        <Canvas>
-            <T.PerspectiveCamera makeDefault position={[0, 12, 0]} rotation={[-Math.PI / 2, 0, 0]} fov={50} />
-            
-            <T.AmbientLight intensity={0.6} />
-            <T.DirectionalLight position={[5, 10, 5]} intensity={0.8} />
-
-            <InteractiveBoard 
-                {gameState}
-                {selectedBoardPiece}
-                {pendingAction}
-                draggingHandPiece={draggingHandPiece}
-                onTileClick={handleTileClick}
-                onPieceClick={handlePieceClick}
-                onTileDrop={handleHandPieceDrop}
-                onPieceMove={(pieceId, x, y) => {
-                    const piece = gameState.boardPieces.find(p => p.id === pieceId);
-                    if (piece && piece.owner === 'player1' && piece.canMove) {
-                        piece.x = x;
-                        piece.y = y;
-                        piece.canMove = false;
-                        selectedBoardPiece = null;
-                        pendingAction = null;
-                        actionMenuPosition = null;
-                    }
-                }}
-            />
-        </Canvas>
+    <div class="actions-row">
+        <input bind:value={opponent} placeholder="Opponent address (p2)" />
+        <button onclick={handleCreate} disabled={!account}>Create Game</button>
+        <input bind:value={gameIdInput} type="number" placeholder="Game id" />
+        <button onclick={handleLoad} disabled={!account}>Load</button>
     </div>
 
-    <!-- Mobile Action Menu (shown when piece is selected) -->
-    {#if selectedBoardPiece && actionMenuPosition}
-        {@const [posX, , posZ] = getTilePosition(selectedBoardPiece.x, selectedBoardPiece.y)}
-        <div class="action-menu" style="--tile-x: {posX}; --tile-z: {posZ};">
-            <div class="action-buttons-top">
-                {#if selectedBoardPiece?.canMove}
-                    <button class="action-btn move-btn" onclick={() => handleActionClick('move')}>
-                        Move
-                    </button>
-                {/if}
-            </div>
-            <div class="action-buttons-middle">
-                {#if selectedBoardPiece?.canUseAbility}
-                    <button class="action-btn ability-btn" onclick={() => handleActionClick('ability')}>
-                        Ability
-                    </button>
-                {/if}
-                {#if selectedBoardPiece?.canAttack}
-                    <button class="action-btn attack-btn" onclick={() => handleActionClick('attack')}>
-                        ⚔️ {selectedBoardPiece.attack}
-                    </button>
-                {/if}
-            </div>
-            <div class="action-buttons-bottom">
-                <button class="action-btn retreat-btn" onclick={() => handleActionClick('retreat')}>
-                    Retreat
-                </button>
-            </div>
-        </div>
+    {#if errorMsg}
+        <div class="error">{errorMsg}</div>
     {/if}
+    <div class="status">Status: {status}</div>
 
-    <!-- Hand Bar -->
-    <HandBar 
-        hand={gameState.hand}
-        selectedIndex={selectedHandIndex}
-        energy={gameState.energy}
-        onPieceClick={handleHandPieceClick}
-        onPieceDragStart={handleHandPieceDragStart}
-    />
-
-    <!-- Drag ghost piece -->
-    {#if draggingHandPiece}
-        <div 
-            class="drag-ghost"
-            style="left: {draggingHandPiece.x}px; top: {draggingHandPiece.y}px;"
-        >
-            <div class="ghost-piece-circle" style="background: {['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf'][draggingHandPiece.piece.type % 4]}">
-                {draggingHandPiece.piece.type + 1}
-            </div>
+    {#if game}
+        <div class="meta">
+            <span>Game #{game.id}</span>
+            <span>Turn {game.turnCount}</span>
+            <span>{game.over ? (game.winner === '0' ? 'Draw' : 'Game over') : ''}</span>
+            {#if isMyTurn()}<span class="yourturn">Your turn</span>{/if}
         </div>
+
+        {#if selectedCapId != null}
+            <div class="edit">
+                Selected cap #{selectedCapId}
+                <button onclick={startPlay}>Play</button>
+                <button onclick={startMove}>Move</button>
+                <button onclick={startAttack}>Attack</button>
+                <span>then tap a cell</span>
+            </div>
+        {/if}
+
+        <div class="board" style="--w:{W};--h:{H}">
+            {#each Array.from({ length: H * W }, (_, idx) => idx) as idx}
+                {@const x = idx % W}
+                {@const y = Math.floor(idx / W)}
+                {@const c = capAt(x, y)}
+                <button
+                    class="cell"
+                    class:selected={selectedCapId != null && c?.id === selectedCapId}
+                    class:highlight={selectedCapId != null}
+                    onclick={() => onCellClick(x, y)}
+                >
+                    {#if c}
+                        <div class="piece" style="background:{colorFor(c)}">
+                            <div class="type">{c.capType === 0 ? '★' : c.capType}</div>
+                            <div class="hp">{c.health}/{c.maxHealth}</div>
+                        </div>
+                    {/if}
+                </button>
+            {/each}
+        </div>
+
+        {#if benchCaps().length > 0}
+            <div class="bench">
+                <span>Bench:</span>
+                {#each benchCaps() as c}
+                    <button
+                        class="bench-piece"
+                        class:selected={selectedCapId === c.id}
+                        onclick={() => { selectedCapId = c.id; pendingMode = 'play'; }}
+                    >#{c.id} t{c.capType} {c.health}hp</button>
+                {/each}
+            </div>
+        {/if}
+
+        <button class="commit" onclick={commitTurn} disabled={queuedActions.length === 0 || committing}>
+            Submit Turn ({queuedActions.length})
+        </button>
     {/if}
 </div>
 
-
 <style>
-    :global(html, body) {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        touch-action: none;
-        -webkit-overflow-scrolling: none;
-        position: fixed;
+    .wrap { font-family: system-ui, sans-serif; padding: 1rem; max-width: 420px; margin: 0 auto; }
+    h1 { margin: 0 0 1rem; }
+    .toolbar, .actions-row, .meta, .edit, .bench { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    input { padding: 0.4rem; border: 1px solid #ccc; border-radius: 6px; }
+    button { padding: 0.4rem 0.8rem; border: none; border-radius: 6px; background: #1976d2; color: #fff; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .addr { font-family: monospace; background: #eee; padding: 0.2rem 0.4rem; border-radius: 4px; }
+    .error { color: #c62828; margin-bottom: 0.5rem; }
+    .status { color: #555; margin-bottom: 0.5rem; }
+    .yourturn { color: #2e7d32; font-weight: 600; }
+    .edit { background: #e3f2fd; padding: 0.4rem; border-radius: 6px; }
+    .board {
+        display: grid;
+        grid-template-columns: repeat(var(--w), 60px);
+        grid-template-rows: repeat(var(--h), 60px);
+        gap: 2px;
+        margin: 1rem 0;
     }
-
-    .game-container {
-        width: 100vw;
-        height: 100vh;
-        height: 100dvh; /* Use dynamic viewport height for mobile */
-        display: flex;
-        flex-direction: column;
-        background: #f5f5f5;
-        overflow: hidden;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        touch-action: none;
-        -webkit-overflow-scrolling: none;
-    }
-
-    .energy-bar {
-        position: absolute;
-        top: 1rem;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 0.5rem 1.5rem;
-        border-radius: 20px;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        z-index: 100;
-        backdrop-filter: blur(10px);
-        border: 2px solid rgba(255, 255, 255, 0.2);
-    }
-
-    .energy-label {
-        font-weight: 600;
-        font-size: 0.9rem;
-    }
-
-    .energy-value {
-        font-weight: 700;
-        font-size: 1rem;
-    }
-
-    .energy-bar-fill {
-        height: 8px;
-        background: linear-gradient(90deg, #4CAF50, #8BC34A);
-        border-radius: 4px;
-        transition: width 0.3s ease;
-    }
-
-    .canvas-wrapper {
-        flex: 1;
-        position: relative;
-        overflow: hidden;
-        width: 100%;
-        height: 100%;
-        touch-action: none;
-        -webkit-overflow-scrolling: none;
-    }
-
-    :global(.canvas-wrapper canvas) {
-        display: block;
-        width: 100% !important;
-        height: 100% !important;
-        touch-action: none;
-    }
-
-    .action-menu {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        z-index: 200;
-        pointer-events: none;
-    }
-
-    .action-buttons-top,
-    .action-buttons-middle,
-    .action-buttons-bottom {
-        display: flex;
-        justify-content: center;
-        gap: 0.5rem;
-        pointer-events: auto;
-    }
-
-    .action-buttons-top {
-        margin-bottom: 0.5rem;
-    }
-
-    .action-buttons-bottom {
-        margin-top: 0.5rem;
-    }
-
-    .action-btn {
-        padding: 0.75rem 1.5rem;
-        border: none;
-        border-radius: 12px;
-        font-size: 1rem;
-        font-weight: 600;
-        color: white;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        min-width: 100px;
-    }
-
-    .move-btn {
-        background: linear-gradient(135deg, #2196F3, #21CBF3);
-    }
-
-    .move-btn:active {
-        transform: scale(0.95);
-    }
-
-    .attack-btn {
-        background: linear-gradient(135deg, #f44336, #e91e63);
-    }
-
-    .attack-btn:active {
-        transform: scale(0.95);
-    }
-
-    .ability-btn {
-        background: linear-gradient(135deg, #9C27B0, #E91E63);
-    }
-
-    .ability-btn:active {
-        transform: scale(0.95);
-    }
-
-    .retreat-btn {
-        background: linear-gradient(135deg, #757575, #424242);
-    }
-
-    .retreat-btn:active {
-        transform: scale(0.95);
-    }
-
-    .drag-ghost {
-        position: fixed;
-        pointer-events: none;
-        z-index: 10000;
-        transform: translate(-50%, -50%);
-    }
-
-    .ghost-piece-circle {
-        width: 60px;
-        height: 60px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: white;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        border: 3px solid rgba(255, 255, 255, 0.5);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-        opacity: 0.9;
-    }
-
-    @media (max-width: 768px) {
-        .energy-bar {
-            top: 0.5rem;
-            padding: 0.4rem 1rem;
-            font-size: 0.85rem;
-        }
-
-        .ghost-piece-circle {
-            width: 50px;
-            height: 50px;
-            font-size: 1.25rem;
-        }
-
-        .action-menu {
-            position: fixed;
-            bottom: 180px;
-            left: 50%;
-            transform: translateX(-50%);
-            top: auto;
-        }
-
-        .action-btn {
-            padding: 1rem 1.5rem;
-            font-size: 1.1rem;
-            min-width: 120px;
-        }
-    }
+    .cell { width: 60px; height: 60px; border: 1px solid #ddd; background: #fafafa; padding: 2px; border-radius: 4px; }
+    .cell.highlight { border-color: #90caf9; }
+    .cell.selected { border-color: #1976d2; }
+    .piece { width: 100%; height: 100%; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; }
+    .type { font-size: 1.1rem; font-weight: 700; }
+    .hp { font-size: 0.7rem; background: rgba(0,0,0,0.3); padding: 0 0.3rem; border-radius: 4px; }
+    .bench { margin-bottom: 1rem; }
+    .bench-piece { background: #6a1b9a; }
+    .bench-piece.selected { outline: 2px solid #000; }
+    .commit { background: #2e7d32; padding: 0.6rem 1.2rem; font-size: 1rem; }
 </style>

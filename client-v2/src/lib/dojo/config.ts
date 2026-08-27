@@ -1,7 +1,6 @@
 import manifest from './manifest.json';
 
 const actionsContract = (manifest as any).contracts.find((c: any) => c.tag === 'caps-actions');
-const planeteloContract = (manifest as any).contracts.find((c: any) => c.tag === 'planetelo-planetelo');
 
 export const dojoConfig = {
     // Sepolia network
@@ -14,7 +13,6 @@ export const dojoConfig = {
     // Contract tags → addresses
     contracts: {
         actions: (actionsContract?.address ?? '') as string,
-        planetelo: (planeteloContract?.address ?? '') as string,
     },
 
     // Cartridge Controller iframe URL (default)

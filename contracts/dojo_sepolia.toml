@@ -4,7 +4,7 @@ description = "The official Dojo Starter guide, the quickest and most streamline
 cover_uri = "file://assets/cover.png"
 icon_uri = "file://assets/icon.png"
 website = "https://github.com/dojoengine/dojo-starter"
-seed = "caps-game-v2-2026-08-27"
+seed = "caps-game-v2-clean-2026-08-27"
 
 [world.socials]
 x = "https://x.com/ohayo_dojo"
@@ -14,10 +14,6 @@ telegram = "https://t.me/dojoengine"
 
 [namespace]
 default = "caps"
-mappings = {"planetelo" = [ "planetelo", "AgentGames", "GlobalStats", "Player"]}
-
-[init_call_args]
-"planetelo-planetelo" = ["0x0694182a014b39855a1b139961a3f39e7d4b43527b30d892a630d66a2abe3780"]
 
 
 [env]
@@ -25,8 +21,7 @@ rpc_url = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
 # Default account for katana with seed = 0
 account_address = "0x0694182a014b39855a1b139961a3f39e7d4b43527b30d892a630d66a2abe3780"
 private_key = "0x0430638cc3ef026ad7a74d9ad143bfc15bf303cea0be1c972ab1f280c90a531a"
-world_address = "0x01a8835b5282e12bc3ec464b00a9aa91e05f57c24416431b2cba9cb5e5c13fe6" # Current deployed world on Sepolia
+world_address = "0x02fd55f302eb4c9d886bca7e965bcf502d51b22af5bf811da46b0c12805c5f73" # Fresh deployed world
 
 [writers]
 "caps" = ["caps-actions"]
-"planetelo" = ["planetelo-planetelo"]
