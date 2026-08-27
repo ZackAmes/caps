@@ -1,31 +1,46 @@
 <script lang="ts">
     import { T } from '@threlte/core';
     import Tile from './tile.svelte';
-    import { DirectionalLight, AmbientLight } from 'three';
+    import { getLayout, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '$lib/dojo/client';
 
     interface Props {
         size?: number;
-        gridSize?: number;
+        layoutId?: number;
     }
 
-    let { size = 1, gridSize = 7 }: Props = $props();
+    let { size = 1, layoutId = LAYOUT_PERIMETER_5X5 }: Props = $props();
 
-    // Generate 7x7 grid of tiles
-    const tiles = Array.from({ length: gridSize }, (_, y) =>
-        Array.from({ length: gridSize }, (_, x) => ({ x, y }))
-    ).flat();
+    let layout = $derived<LayoutConfig>(getLayout(layoutId));
 
-    // Checkerboard pattern colors
+    let tiles = $derived(
+        Array.from({ length: layout.height }, (_, y) =>
+            Array.from({ length: layout.width }, (_, x) => ({
+                x,
+                y,
+                isWalkable: layout.isWalkable(x, y),
+                isDeploy: (x === layout.p1Deploy[0] && y === layout.p1Deploy[1]) ||
+                          (x === layout.p2Deploy[0] && y === layout.p2Deploy[1]),
+            }))
+        ).flat()
+    );
+
     const getTileColor = (x: number, y: number) => {
-        return (x + y) % 2 === 0 ? '#e8e8e8' : '#d0d0d0';
+        return (x + y) % 2 === 0 ? '#ffffff' : '#f1f5f9';
     };
 </script>
 
-<!-- Directional light for better visibility -->
 <T.DirectionalLight position={[10, 10, 5]} intensity={1} />
-<T.AmbientLight intensity={0.5} />
+<T.AmbientLight intensity={0.6} />
 
-<!-- Render all tiles -->
 {#each tiles as tile}
-    <Tile x={tile.x} y={tile.y} {size} color={getTileColor(tile.x, tile.y)} />
+    <Tile
+        x={tile.x}
+        y={tile.y}
+        width={layout.width}
+        height={layout.height}
+        {size}
+        color={getTileColor(tile.x, tile.y)}
+        isWalkable={tile.isWalkable}
+        isDeploy={tile.isDeploy}
+    />
 {/each}

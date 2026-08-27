@@ -6,3 +6,7 @@ pub mod models {
     pub mod cap;
     pub mod game;
 }
+
+pub mod logic {
+    pub mod track;
+}

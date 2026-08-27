@@ -14,6 +14,7 @@ pub struct Game {
     pub id: u64,
     pub player1: felt252,
     pub player2: felt252,
+    pub layout: u8,
     pub turn_count: u64,
     pub over: bool,
     pub winner: felt252,

@@ -1,35 +1,51 @@
 <script lang="ts">
     import { T } from '@threlte/core';
 
-    interface Piece {
+    export interface ScenePiece {
         x: number;
         y: number;
         color: string;
-        height?: number;
+        isTower?: boolean;
+        health?: number;
     }
 
     interface Props {
-        pieces?: Piece[];
+        pieces?: ScenePiece[];
+        width?: number;
+        height?: number;
         tileSize?: number;
         pieceRadius?: number;
     }
 
-    let { pieces = [], tileSize = 1, pieceRadius = 0.4 }: Props = $props();
+    let {
+        pieces = [],
+        width = 5,
+        height = 5,
+        tileSize = 1,
+        pieceRadius = 0.38,
+    }: Props = $props();
 
-    // Convert grid coordinates to world position
-    const gridToWorld = (x: number, y: number, height: number = 0) => {
-        return [
-            (x - 3) * tileSize,
-            0.5 + height * 0.3, // Piece height from ground
-            (y - 3) * tileSize
-        ];
+    const gridToWorld = (x: number, y: number, isTower: boolean = false): [number, number, number] => {
+        const posX = (x - (width - 1) / 2) * tileSize;
+        const posZ = (y - (height - 1) / 2) * tileSize;
+        const posY = isTower ? 0.35 : 0.25;
+        return [posX, posY, posZ];
     };
 </script>
 
-{#each pieces as piece, i}
-    {@const [posX, posY, posZ] = gridToWorld(piece.x, piece.y, piece.height ?? 0)}
-    <T.Mesh position={[posX, posY, posZ]}>
-        <T.CylinderGeometry args={[pieceRadius, pieceRadius, 0.4, 32]} />
-        <T.MeshStandardMaterial color={piece.color} />
-    </T.Mesh>
+{#each pieces as piece}
+    {@const [posX, posY, posZ] = gridToWorld(piece.x, piece.y, piece.isTower)}
+    <T.Group position={[posX, posY, posZ]}>
+        {#if piece.isTower}
+            <T.Mesh>
+                <T.CylinderGeometry args={[pieceRadius * 1.1, pieceRadius * 1.2, 0.6, 6]} />
+                <T.MeshStandardMaterial color={piece.color} metalness={0.2} roughness={0.4} />
+            </T.Mesh>
+        {:else}
+            <T.Mesh>
+                <T.CylinderGeometry args={[pieceRadius, pieceRadius, 0.35, 32]} />
+                <T.MeshStandardMaterial color={piece.color} roughness={0.3} />
+            </T.Mesh>
+        {/if}
+    </T.Group>
 {/each}
