@@ -14,6 +14,7 @@
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/adapter-vercel": "^6.3.4",
 		"@sveltejs/kit": "^2.47.1",
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
 		"svelte": "^5.41.0",
@@ -24,7 +25,6 @@
 	"dependencies": {
 		"@cartridge/controller": "^0.11.2",
 		"@dojoengine/sdk": "^1.8.5",
-		"@sveltejs/adapter-node": "^5.4.0",
 		"@threlte/core": "^8.3.0",
 		"@threlte/extras": "^9.7.0",
 		"starknet": "^8.7.0",
