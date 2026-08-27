@@ -1,5 +1,5 @@
 // Re-export parser utilities
-export { 
+export {
   parseCapType, 
   parseGameState,
   serializeGame,
@@ -24,4 +24,7 @@ export type {
   // Simplified types
   CapSimple, LocationSimple, ActionTypeSimple,
 } from './parser';
+
+// Dojo SDK bindings and config
+export * from './dojo';
 
