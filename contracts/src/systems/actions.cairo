@@ -376,7 +376,7 @@ pub mod actions {
                 @game, @effects,
             );
 
-            let mut caller = starknet::contract_address_const::<0x0>();
+            let mut caller = 0.try_into().unwrap();
 
             if game.turn_count % 2 == 0 {
                 caller = game.player1;
@@ -487,7 +487,7 @@ pub mod actions {
         fn get_game(self: @ContractState, game_id: u64) -> Option<(Game, Span<Cap>, Span<Effect>)> {
             let mut world = self.world_default();
             let game: Game = world.read_model(game_id);
-            if game.player1 == starknet::contract_address_const::<0x0>() {
+            if game.player1 == 0.try_into().unwrap() {
                 return Option::None;
             }
             let mut i = 0;

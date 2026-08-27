@@ -106,7 +106,7 @@ mod planetelo {
             if *over {
                 return (*over, *winner);
             }
-            return (false, starknet::contract_address_const::<0>());
+            return (false, 0.try_into().unwrap());
         }
 
         fn play_agent(ref self: ContractState) -> u128 {

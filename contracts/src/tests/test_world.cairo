@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn test_world_test_set() {
         // Initialize test environment
-        let caller = starknet::contract_address_const::<0x0>();
+        let caller = 0.try_into().unwrap();
         let ndef = namespace_def();
 
         // Register the resources.
@@ -69,8 +69,8 @@ mod tests {
         let (contract_address, _) = world.dns(@"actions").unwrap();
         let actions_system = IActionsDispatcher { contract_address };
 
-        let p1 = starknet::contract_address_const::<0x1>();
-        let p2 = starknet::contract_address_const::<0x2>();
+        let p1 = 1.try_into().unwrap();
+        let p2 = 2.try_into().unwrap();
 
         let game_id = actions_system.create_game(p1, p2, 1, 1);
 
