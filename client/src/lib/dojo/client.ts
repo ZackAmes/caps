@@ -1,4 +1,4 @@
-import { RpcProvider, CallData, constants } from "starknet";
+import { RpcProvider, CallData, Account, constants } from "starknet";
 import type { AccountInterface } from "starknet";
 import Controller from "@cartridge/controller";
 import type { SessionPolicies } from "@cartridge/presets";
@@ -11,6 +11,12 @@ const provider = new RpcProvider({ nodeUrl: RPC });
 
 let controller: Controller | null = null;
 let account: AccountInterface | null = null;
+// Dev mode: bypass Controller entirely with a raw funded account. Set
+// DEV_ACCOUNT_ADDRESS + DEV_PRIVATE_KEY in Vercel env / local .env.
+// Use a throwaway key — the private key ships in the client bundle.
+const DEV_ADDRESS = (import.meta.env as any).DEV_ACCOUNT_ADDRESS as string | undefined;
+const DEV_PRIVATE_KEY = (import.meta.env as any).DEV_PRIVATE_KEY as string | undefined;
+const devMode = Boolean(DEV_ADDRESS && DEV_PRIVATE_KEY);
 
 // Session policies: user approves once, then create/turn calls run gaslessly
 // via the Controller paymaster without a manual approval modal each turn.
@@ -147,7 +153,22 @@ export interface ChainGame {
   caps: ChainCap[];
 }
 
+export function isDevMode(): boolean {
+  return devMode;
+}
+
 export async function connect(): Promise<AccountInterface> {
+  if (devMode) {
+    // Dev account path: no Controller, no sessions, no paymaster.
+    // Gas is paid directly from the dev account's STRK.
+    account = new Account({
+      provider,
+      address: DEV_ADDRESS!,
+      signer: DEV_PRIVATE_KEY!,
+    });
+    return account;
+  }
+
   controller = new Controller({
     // Chain config is required — without it Controller defaults to mainnet.
     chains: [{ rpcUrl: RPC }],

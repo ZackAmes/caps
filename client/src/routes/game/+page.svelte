@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import {
         connect, isConnected, getAccount, createGame, createSoloGame, takeTurn, getGame,
-        getLayout, isValidStep, isSurrounded, LAYOUTS, LAYOUT_PERIMETER_5X5,
+        getLayout, isValidStep, isSurrounded, LAYOUTS, LAYOUT_PERIMETER_5X5, isDevMode,
         type ChainGame, type ChainCap, type TurnAction, type LayoutConfig, CAP_STATS,
     } from '$lib/dojo/client';
 
@@ -30,6 +30,7 @@
     let logOpen = $state(false);
 
     let addrCopied = $state(false);
+    const devMode = isDevMode();
 
     async function copyAddress() {
         if (!account) return;
@@ -351,6 +352,7 @@
     <header class="topbar">
         <h1>CAPS</h1>
         {#if account}
+            {#if devMode}<span class="dev-badge">DEV</span>{/if}
             <button class="addr" onclick={copyAddress} title="Tap to copy full address">
                 {addrCopied ? '✓ Copied' : `${account.slice(0, 6)}…${account.slice(-4)}`}
                 <span class="copy-icon">{addrCopied ? '' : '⧉'}</span>
@@ -365,7 +367,9 @@
                 <div class="error">{errorMsg}</div>
             {/if}
             {#if !account}
-                <button class="primary big" onclick={handleConnect} disabled={busy !== null}>Connect Controller</button>
+                <button class="primary big" onclick={handleConnect} disabled={busy !== null}>
+                    {devMode ? 'Enter Dev Mode' : 'Connect Controller'}
+                </button>
                 {#if busy}
                     <div class="busy"><span class="spinner"></span>{busy}</div>
                 {/if}
@@ -608,6 +612,16 @@
     }
     .addr:active { border-color: #38bdf8; }
     .copy-icon { opacity: 0.6; font-size: 0.85em; }
+    .dev-badge {
+        background: #7c2d12;
+        border: 1px solid #ea580c;
+        color: #fdba74;
+        font-size: 0.7rem;
+        font-weight: 800;
+        padding: 0.2rem 0.45rem;
+        border-radius: 6px;
+        letter-spacing: 0.08em;
+    }
 
     /* Lobby */
     .lobby { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 1rem; }
