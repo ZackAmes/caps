@@ -4,11 +4,7 @@ import Controller from "@cartridge/controller";
 import type { SessionPolicies } from "@cartridge/presets";
 import { dojoConfig } from "./config";
 
-// App-level provider: Alchemy (reads via get_game, tx receipts).
 const RPC = dojoConfig.rpcUrl;
-// Controller runs against the Cartridge RPC (required for its custom
-// session-execution method).
-const CONTROLLER_RPC = dojoConfig.controllerRpcUrl;
 const ACTIONS = dojoConfig.contracts.actions;
 
 const provider = new RpcProvider({ nodeUrl: RPC });
@@ -154,9 +150,7 @@ export interface ChainGame {
 export async function connect(): Promise<AccountInterface> {
   controller = new Controller({
     // Chain config is required — without it Controller defaults to mainnet.
-    // Must point at the Cartridge RPC: the controller executes sessions via
-    // the custom cartridge_addExecuteOutsideTransaction method.
-    chains: [{ rpcUrl: CONTROLLER_RPC }],
+    chains: [{ rpcUrl: RPC }],
     defaultChainId: constants.StarknetChainId.SN_SEPOLIA,
     policies,
     propagateSessionErrors: true,
