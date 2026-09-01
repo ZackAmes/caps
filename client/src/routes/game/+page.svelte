@@ -29,6 +29,28 @@
     let logLines = $state<string[]>([]);
     let logOpen = $state(false);
 
+    let addrCopied = $state(false);
+
+    async function copyAddress() {
+        if (!account) return;
+        try {
+            await navigator.clipboard.writeText(account);
+        } catch {
+            // Clipboard API can be blocked (insecure context / iOS); fall back
+            const ta = document.createElement('textarea');
+            ta.value = account;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch { /* ignore */ }
+            ta.remove();
+        }
+        addrCopied = true;
+        log('Address copied to clipboard');
+        setTimeout(() => { addrCopied = false; }, 1500);
+    }
+
     function log(msg: string, kind: 'info' | 'error' = 'info') {
         const t = new Date().toLocaleTimeString([], { hour12: false });
         logLines = [...logLines.slice(-49), `[${t}] ${kind === 'error' ? '\u274c' : '\u00b7'} ${msg}`];
@@ -329,7 +351,10 @@
     <header class="topbar">
         <h1>CAPS</h1>
         {#if account}
-            <span class="addr" title={account}>{account.slice(0, 6)}…{account.slice(-4)}</span>
+            <button class="addr" onclick={copyAddress} title="Tap to copy full address">
+                {addrCopied ? '✓ Copied' : `${account.slice(0, 6)}…${account.slice(-4)}`}
+                <span class="copy-icon">{addrCopied ? '' : '⧉'}</span>
+            </button>
         {/if}
     </header>
 
@@ -355,9 +380,24 @@
                     <p class="hint">{getLayout(selectedLayout).description}</p>
                 </div>
 
+                {#if busy}
+                    <div class="busy"><span class="spinner"></span>{busy}</div>
+                {/if}
+
                 <button class="primary big" onclick={handleCreateSolo} disabled={busy !== null}>
-                    {busy ?? '🎮 Play Solo (Both Sides)'}
+                    🎮 Play Solo (Both Sides)
                 </button>
+
+                <details class="fund-help">
+                    <summary>⛽ Fund account (for gas when paymaster fails)</summary>
+                    <div class="fund-body">
+                        <p class="hint">1. Tap the address above to copy it.</p>
+                        <p class="hint">2. Get free Sepolia STRK from a faucet:</p>
+                        <a class="faucet-link" href="https://starknet-faucet.vercel.app/" target="_blank" rel="noopener">starknet-faucet.vercel.app ↗</a>
+                        <a class="faucet-link" href="https://sepolia.starkscan.co/faucet" target="_blank" rel="noopener">sepolia.starkscan.co/faucet ↗</a>
+                        <p class="hint">3. Paste your address there, receive STRK, then retry your turn.</p>
+                    </div>
+                </details>
                 {#if busy}
                     <div class="busy"><span class="spinner"></span>{busy}</div>
                 {/if}
@@ -554,11 +594,20 @@
     .addr {
         font-family: ui-monospace, monospace;
         background: #1e293b;
-        padding: 0.25rem 0.5rem;
+        padding: 0.4rem 0.6rem;
         border-radius: 6px;
         font-size: 0.8rem;
         border: 1px solid #334155;
+        color: #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
     }
+    .addr:active { border-color: #38bdf8; }
+    .copy-icon { opacity: 0.6; font-size: 0.85em; }
 
     /* Lobby */
     .lobby { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 1rem; }
@@ -741,6 +790,33 @@
     }
     .commit:disabled { background: #14532d; }
 
+    .fund-help {
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        background: #0b1220;
+    }
+    .fund-help summary {
+        cursor: pointer;
+        padding: 0.5rem 0.7rem;
+        color: #94a3b8;
+        font-size: 0.85rem;
+        user-select: none;
+    }
+    .fund-body {
+        padding: 0.25rem 0.7rem 0.7rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+    }
+    .faucet-link {
+        color: #38bdf8;
+        font-size: 0.85rem;
+        text-decoration: none;
+        padding: 0.35rem 0.6rem;
+        border: 1px solid #164e63;
+        border-radius: 6px;
+        background: #082f49;
+    }
     .busy {
         display: flex;
         align-items: center;
