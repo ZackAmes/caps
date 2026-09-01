@@ -1,6 +1,7 @@
-import { RpcProvider, CallData } from "starknet";
+import { RpcProvider, CallData, constants } from "starknet";
 import type { AccountInterface } from "starknet";
 import Controller from "@cartridge/controller";
+import type { SessionPolicies } from "@cartridge/presets";
 import { dojoConfig } from "./config";
 
 const RPC = dojoConfig.rpcUrl;
@@ -10,6 +11,25 @@ const provider = new RpcProvider({ nodeUrl: RPC });
 
 let controller: Controller | null = null;
 let account: AccountInterface | null = null;
+
+// Session policies: user approves once, then create/turn calls run gaslessly
+// via the Controller paymaster without a manual approval modal each turn.
+const policies: SessionPolicies = {
+  contracts: {
+    [ACTIONS]: {
+      description: "CAPS — deploy caps, move, attack, and capture",
+      methods: [
+        { name: "Create Game", entrypoint: "create_game" },
+        { name: "Create Game with Layout", entrypoint: "create_game_with_layout" },
+        { name: "Create Solo Game", entrypoint: "create_solo_game" },
+        { name: "Create Solo Game with Layout", entrypoint: "create_solo_game_with_layout" },
+        { name: "Take Turn", entrypoint: "take_turn" },
+        { name: "Get Game", entrypoint: "get_game" },
+        { name: "Upgrade", entrypoint: "upgrade" },
+      ],
+    },
+  },
+};
 
 export const CAP_STATS: Record<number, [number, number, number, number]> = {
   0: [12, 2, 1, 1],
@@ -128,9 +148,20 @@ export interface ChainGame {
 }
 
 export async function connect(): Promise<AccountInterface> {
-  controller = new Controller({ rpcUrl: RPC });
-  account = (await controller.connect()) ?? null;
-  return account!;
+  controller = new Controller({
+    // Chain config is required — without it Controller defaults to mainnet.
+    chains: [{ rpcUrl: RPC }],
+    defaultChainId: constants.StarknetChainId.SN_SEPOLIA,
+    policies,
+    propagateSessionErrors: true,
+  });
+  const acc = await controller.connect();
+  if (!acc) {
+    account = null;
+    throw new Error("Sign-in was cancelled or failed");
+  }
+  account = acc;
+  return acc;
 }
 
 export function isConnected(): boolean {
@@ -146,25 +177,40 @@ export function getAddress(): string {
   return getAccount().address;
 }
 
-export async function createGame(p2: string, layout: number = LAYOUT_PERIMETER_5X5): Promise<number> {
+/** Executes a call and waits for the transaction. Session txs are gasless
+ *  once policies are approved; manual fallback opens the keychain modal. */
+async function executeAndWait(call: {
+  contractAddress: string;
+  entrypoint: string;
+  calldata: any;
+}): Promise<string> {
   const acc = getAccount();
-  const res = await acc.execute({
+  const res: any = await acc.execute(call);
+  if (res && res.code && res.code !== "SUCCESS" && res.transaction_hash === undefined) {
+    throw new Error(res.message ?? `Controller error (code ${res.code})`);
+  }
+  if (!res || !res.transaction_hash) {
+    throw new Error("No transaction hash returned from Controller");
+  }
+  await provider.waitForTransaction(res.transaction_hash);
+  return res.transaction_hash;
+}
+
+export async function createGame(p2: string, layout: number = LAYOUT_PERIMETER_5X5): Promise<number> {
+  await executeAndWait({
     contractAddress: ACTIONS,
     entrypoint: "create_game_with_layout",
     calldata: CallData.compile([p2, layout]),
   });
-  await provider.waitForTransaction(res.transaction_hash);
   return 1;
 }
 
 export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5): Promise<number> {
-  const acc = getAccount();
-  const res = await acc.execute({
+  await executeAndWait({
     contractAddress: ACTIONS,
     entrypoint: "create_solo_game_with_layout",
     calldata: CallData.compile([layout]),
   });
-  await provider.waitForTransaction(res.transaction_hash);
   return 1;
 }
 
@@ -208,17 +254,15 @@ export function isSurrounded(game: ChainGame, x: number, y: number): boolean {
 }
 
 export async function takeTurn(gameId: number, actions: TurnAction[]): Promise<void> {
-  const acc = getAccount();
   const flat: (string | number)[] = [gameId, actions.length];
   for (const a of actions) {
     flat.push(a.capId, ACTION_VARIANT[a.kind], a.x, a.y);
   }
-  const res = await acc.execute({
+  await executeAndWait({
     contractAddress: ACTIONS,
     entrypoint: "take_turn",
     calldata: CallData.compile(flat),
   });
-  await provider.waitForTransaction(res.transaction_hash);
 }
 
 function num(v: string): number {

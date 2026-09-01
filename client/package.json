@@ -24,6 +24,7 @@
 	},
 	"dependencies": {
 		"@cartridge/controller": "^0.11.2",
+		"@cartridge/presets": "0.5.4",
 		"@dojoengine/sdk": "^1.8.5",
 		"@threlte/core": "^8.3.0",
 		"@threlte/extras": "^9.7.0",
