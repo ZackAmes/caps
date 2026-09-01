@@ -24,45 +24,101 @@
     let activeLayout = $derived<LayoutConfig>(getLayout(game ? game.layout : selectedLayout));
     let isSolo = $derived<boolean>(!!game && game.player1 === game.player2);
 
+    // Busy indicator + on-screen log so mobile users can debug without devtools
+    let busy = $state<string | null>(null);
+    let logLines = $state<string[]>([]);
+    let logOpen = $state(false);
+
+    function log(msg: string, kind: 'info' | 'error' = 'info') {
+        const t = new Date().toLocaleTimeString([], { hour12: false });
+        logLines = [...logLines.slice(-49), `[${t}] ${kind === 'error' ? '\u274c' : '\u00b7'} ${msg}`];
+        if (kind === 'error') logOpen = true;
+    }
+
     async function handleConnect() {
         errorMsg = null;
+        busy = 'Opening Controller\u2026';
+        log('Connect requested');
         try {
             const acc = await connect();
             account = acc.address;
             status = 'Connected';
+            log(`Connected as ${acc.address.slice(0, 10)}\u2026`);
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
+            log(`Connect failed: ${errorMsg}`, 'error');
+        } finally {
+            busy = null;
         }
+    }
+
+    /** After a create tx mines, find the newest game belonging to us. */
+    async function discoverMyGame(): Promise<number | null> {
+        const PROBE = 40;
+        const results = await Promise.allSettled(
+            Array.from({ length: PROBE }, (_, i) => getGame(i + 1))
+        );
+        let best: number | null = null;
+        results.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value) {
+                const g = r.value;
+                if (g.player1 === account || g.player2 === account) {
+                    if (best === null || g.id > best) best = g.id;
+                }
+            }
+        });
+        return best;
     }
 
     async function handleCreate() {
         errorMsg = null;
+        if (!account) { errorMsg = 'Connect first'; return; }
+        const opp = opponent.trim();
+        if (!opp) { errorMsg = 'Enter an opponent address'; return; }
+        busy = 'Creating game\u2026';
+        log(`Creating game vs ${opp.slice(0, 10)}\u2026`);
         try {
-            const opp = opponent.trim();
-            if (!opp) throw new Error('Enter an opponent address');
             await createGame(opp, selectedLayout);
-            status = 'Game created';
-            await refreshGames();
+            log('Game tx confirmed');
+            busy = 'Finding your game\u2026';
+            const id = await discoverMyGame();
+            if (id == null) {
+                status = 'Game created \u2014 enter its id manually to load';
+                log('Could not auto-find game id', 'error');
+                return;
+            }
+            gameIdInput = String(id);
+            await handleLoad();
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
+            log(`Create failed: ${errorMsg}`, 'error');
+        } finally {
+            busy = null;
         }
     }
 
     async function handleCreateSolo() {
         errorMsg = null;
+        if (!account) { errorMsg = 'Connect first'; return; }
+        busy = 'Creating solo game\u2026';
+        log(`Creating solo game (${getLayout(selectedLayout).name})`);
         try {
             await createSoloGame(selectedLayout);
-            status = `Solo game created (${getLayout(selectedLayout).name})`;
-            await refreshGames();
+            log('Solo game tx confirmed');
+            busy = 'Finding your game\u2026';
+            const id = await discoverMyGame();
+            if (id == null) {
+                status = 'Game created \u2014 enter its id manually to load';
+                log('Could not auto-find game id', 'error');
+                return;
+            }
+            gameIdInput = String(id);
+            await handleLoad();
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
-        }
-    }
-
-    async function refreshGames() {
-        const id = Number(gameIdInput);
-        if (!Number.isNaN(id) && id > 0) {
-            await handleLoad();
+            log(`Create failed: ${errorMsg}`, 'error');
+        } finally {
+            busy = null;
         }
     }
 
@@ -77,8 +133,10 @@
             pendingMode = null;
             queuedActions = [];
             status = `Loaded game #${id}`;
+            log(`Loaded game #${id} (turn ${game.turnCount}, layout ${game.layout})`);
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
+            log(`Load failed: ${errorMsg}`, 'error');
         }
     }
 
@@ -240,13 +298,16 @@
         if (!game || queuedActions.length === 0) return;
         errorMsg = null;
         committing = true;
+        log(`Submitting ${queuedActions.length} action(s)\u2026`);
         try {
             await takeTurn(game.id, queuedActions);
             queuedActions = [];
             status = 'Turn submitted';
+            log('Turn tx confirmed');
             await handleLoad();
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
+            log(`Turn failed: ${errorMsg}`, 'error');
         } finally {
             committing = false;
         }
@@ -275,8 +336,14 @@
     {#if !game}
         <!-- Lobby -->
         <section class="lobby">
+            {#if errorMsg}
+                <div class="error">{errorMsg}</div>
+            {/if}
             {#if !account}
-                <button class="primary big" onclick={handleConnect}>Connect Controller</button>
+                <button class="primary big" onclick={handleConnect} disabled={busy !== null}>Connect Controller</button>
+                {#if busy}
+                    <div class="busy"><span class="spinner"></span>{busy}</div>
+                {/if}
             {:else}
                 <div class="field">
                     <label for="layout-select">Board Layout</label>
@@ -288,7 +355,12 @@
                     <p class="hint">{getLayout(selectedLayout).description}</p>
                 </div>
 
-                <button class="primary big" onclick={handleCreateSolo}>🎮 Play Solo (Both Sides)</button>
+                <button class="primary big" onclick={handleCreateSolo} disabled={busy !== null}>
+                    {busy ?? '🎮 Play Solo (Both Sides)'}
+                </button>
+                {#if busy}
+                    <div class="busy"><span class="spinner"></span>{busy}</div>
+                {/if}
 
                 <div class="divider"><span>or play vs opponent</span></div>
 
@@ -296,7 +368,7 @@
                     <label for="opp">Opponent Address</label>
                     <input id="opp" bind:value={opponent} placeholder="0x…" />
                 </div>
-                <button class="big" onclick={handleCreate} disabled={!opponent.trim()}>Create Game</button>
+                <button class="big" onclick={handleCreate} disabled={!opponent.trim() || busy !== null}>Create Game</button>
 
                 <div class="divider"><span>load existing</span></div>
 
@@ -433,11 +505,25 @@
             {/if}
 
             <!-- Commit -->
-            <button class="commit" onclick={commitTurn} disabled={queuedActions.length === 0 || committing}>
-                {committing ? 'Submitting…' : `Submit Turn (${queuedActions.length})`}
+            <button class="commit" onclick={commitTurn} disabled={queuedActions.length === 0 || committing || busy !== null}>
+                {committing || busy ? (committing ? 'Submitting…' : busy) : `Submit Turn (${queuedActions.length})`}
             </button>
         </section>
     {/if}
+
+    <!-- On-screen debug log (for mobile, where devtools aren't available) -->
+    <details class="debug-log" bind:open={logOpen}>
+        <summary>Debug log ({logLines.length})</summary>
+        <div class="log-lines">
+            {#each logLines as line}
+                <div class="log-line">{line}</div>
+            {/each}
+            {#if logLines.length === 0}
+                <div class="log-line muted">No events yet</div>
+            {/if}
+        </div>
+        <button class="clear-log" onclick={() => { logLines = []; }}>Clear</button>
+    </details>
 </div>
 
 <style>
@@ -654,6 +740,53 @@
         margin-top: auto;
     }
     .commit:disabled { background: #14532d; }
+
+    .busy {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: #93c5fd;
+        font-size: 0.9rem;
+        justify-content: center;
+    }
+    .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid #334155;
+        border-top-color: #38bdf8;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .debug-log {
+        margin-top: 0.75rem;
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        background: #0b1220;
+        font-size: 0.75rem;
+    }
+    .debug-log summary {
+        cursor: pointer;
+        padding: 0.45rem 0.7rem;
+        color: #64748b;
+        user-select: none;
+    }
+    .log-lines {
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 0.25rem 0.7rem;
+        font-family: ui-monospace, monospace;
+        word-break: break-all;
+    }
+    .log-line { color: #94a3b8; padding: 0.12rem 0; white-space: pre-wrap; }
+    .log-line.muted { color: #475569; }
+    .clear-log {
+        margin: 0.4rem 0.7rem 0.6rem;
+        padding: 0.25rem 0.7rem;
+        font-size: 0.72rem;
+        background: #1e293b;
+    }
 
     /* Small phone tweaks */
     @media (max-width: 380px) {
