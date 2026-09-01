@@ -11,12 +11,12 @@ const provider = new RpcProvider({ nodeUrl: RPC });
 
 let controller: Controller | null = null;
 let account: AccountInterface | null = null;
-// Dev mode: bypass Controller entirely with a raw funded account. Set
-// DEV_ACCOUNT_ADDRESS + DEV_PRIVATE_KEY in Vercel env / local .env.
-// Use a throwaway key — the private key ships in the client bundle.
-const DEV_ADDRESS = (import.meta.env as any).DEV_ACCOUNT_ADDRESS as string | undefined;
-const DEV_PRIVATE_KEY = (import.meta.env as any).DEV_PRIVATE_KEY as string | undefined;
-const devMode = Boolean(DEV_ADDRESS && DEV_PRIVATE_KEY);
+// Dev mode: bypass Controller entirely with a raw funded test account.
+// Sepolia test key only — fine to hardcode since the account holds nothing
+// of value. Remove before any mainnet/public launch.
+const DEV_ADDRESS = "0x694182a014b39855a1b139961a3f39e7d4b43527b30d892a630d66a2abe3780";
+const DEV_PRIVATE_KEY = "0x0430638cc3ef026ad7a74d9ad143bfc15bf303cea0be1c972ab1f280c90a531a";
+const devMode = true;
 
 // Session policies: user approves once, then create/turn calls run gaslessly
 // via the Controller paymaster without a manual approval modal each turn.
