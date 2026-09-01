@@ -154,6 +154,7 @@ export async function connect(): Promise<AccountInterface> {
     defaultChainId: constants.StarknetChainId.SN_SEPOLIA,
     policies,
     propagateSessionErrors: true,
+    errorDisplayMode: "notification",
   });
   const acc = await controller.connect();
   if (!acc) {
