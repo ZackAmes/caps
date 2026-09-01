@@ -153,8 +153,14 @@ export async function connect(): Promise<AccountInterface> {
     chains: [{ rpcUrl: RPC }],
     defaultChainId: constants.StarknetChainId.SN_SEPOLIA,
     policies,
-    propagateSessionErrors: true,
-    errorDisplayMode: "notification",
+    // Do NOT propagate session errors: when gasless sponsorship fails
+    // (e.g. AVNU paymaster outage), the keychain modal must open so the
+    // user can execute manually with their own STRK balance. Propagating
+    // errors would skip that fallback entirely.
+    propagateSessionErrors: false,
+    // Modal (default) shows the full manual-execution flow on failure —
+    // more reliable on mobile than an auto-dismissing toast.
+    errorDisplayMode: "modal",
   });
   const acc = await controller.connect();
   if (!acc) {
@@ -187,6 +193,9 @@ async function executeAndWait(call: {
 }): Promise<string> {
   const acc = getAccount();
   const res: any = await acc.execute(call);
+  // With propagateSessionErrors=false, failures surface as thrown errors or
+  // non-SUCCESS codes after the modal flow. Normalize both into a throw so
+  // callers can log/display them.
   if (res && res.code && res.code !== "SUCCESS" && res.transaction_hash === undefined) {
     throw new Error(res.message ?? `Controller error (code ${res.code})`);
   }
