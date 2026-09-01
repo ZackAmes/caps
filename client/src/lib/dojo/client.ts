@@ -168,13 +168,43 @@ export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5): Pro
   return 1;
 }
 
-const ACTION_VARIANT: Record<string, number> = { Play: 0, Move: 1, Attack: 2 };
+const ACTION_VARIANT: Record<string, number> = { Play: 0, Move: 1, Attack: 2, ClaimCapture: 3 };
 
 export interface TurnAction {
   capId: number;
-  kind: "Play" | "Move" | "Attack";
+  kind: "Play" | "Move" | "Attack" | "ClaimCapture";
   x: number;
   y: number;
+}
+
+/** Check if an enemy cap at (x, y) is fully surrounded on the given layout.
+ *  Towers are immune to capture; they must be destroyed. */
+export function isSurrounded(game: ChainGame, x: number, y: number): boolean {
+  const layout = getLayout(game.layout);
+  const target = game.caps.find(c => c.x === x && c.y === y);
+  if (!target || target.capType === 0) return false;
+
+  const neighbors: Array<[number, number]> = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && nx < layout.width && ny >= 0 && ny < layout.height) {
+        if (layout.isWalkable(nx, ny)) {
+          neighbors.push([nx, ny]);
+        }
+      }
+    }
+  }
+  if (neighbors.length === 0) return false;
+
+  for (const [nx, ny] of neighbors) {
+    const blocker = game.caps.find(c => c.x === nx && c.y === ny);
+    if (!blocker) return false; // free escape tile
+    if (blocker.owner === target.owner) return false; // friendly doesn't block
+  }
+  return true;
 }
 
 export async function takeTurn(gameId: number, actions: TurnAction[]): Promise<void> {

@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import {
         connect, isConnected, getAccount, createGame, createSoloGame, takeTurn, getGame,
-        getLayout, isValidStep, LAYOUTS, LAYOUT_PERIMETER_5X5, LAYOUT_CROSS_5X5,
+        getLayout, isValidStep, isSurrounded, LAYOUTS, LAYOUT_PERIMETER_5X5,
         type ChainGame, type ChainCap, type TurnAction, type LayoutConfig, CAP_STATS,
     } from '$lib/dojo/client';
 
@@ -17,11 +17,12 @@
 
     // Turn editor
     let selectedCapId = $state<number | null>(null);
-    let pendingMode = $state<'move' | 'attack' | 'play' | null>(null);
+    let pendingMode = $state<'move' | 'attack' | 'play' | 'capture' | null>(null);
     let queuedActions: TurnAction[] = $state([]);
     let committing = $state(false);
 
     let activeLayout = $derived<LayoutConfig>(getLayout(game ? game.layout : selectedLayout));
+    let isSolo = $derived<boolean>(!!game && game.player1 === game.player2);
 
     async function handleConnect() {
         errorMsg = null;
@@ -51,7 +52,7 @@
         errorMsg = null;
         try {
             await createSoloGame(selectedLayout);
-            status = `Solo game created with ${activeLayout.name}`;
+            status = `Solo game created (${getLayout(selectedLayout).name})`;
             await refreshGames();
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
@@ -74,25 +75,35 @@
             if (!game) throw new Error(`Game ${id} not found`);
             selectedCapId = null;
             pendingMode = null;
-            status = `Loaded game #${id} (${getLayout(game.layout).name})`;
+            queuedActions = [];
+            status = `Loaded game #${id}`;
         } catch (e: any) {
             errorMsg = e?.message ?? String(e);
         }
     }
 
+    function turnPlayerAddress(): string | null {
+        if (!game) return null;
+        return game.turnCount % 2 === 0 ? game.player1 : game.player2;
+    }
+
     function isMyCap(c: ChainCap): boolean {
         if (!account || !game) return false;
-        if (game.player1 === game.player2 && game.player1 === account) {
-            const currentTurnPlayer = game.turnCount % 2 === 0 ? game.player1 : game.player2;
-            return c.owner === currentTurnPlayer;
+        if (isSolo) {
+            // In solo mode, control whichever side currently has the turn
+            return c.owner === turnPlayerAddress();
         }
         return c.owner === account;
     }
 
     function isMyTurn(): boolean {
         if (!game || !account) return false;
-        const turnPlayer = game.turnCount % 2 === 0 ? game.player1 : game.player2;
-        return turnPlayer === account;
+        return turnPlayerAddress() === account;
+    }
+
+    function isSoloPlayerTurnSide(): boolean {
+        if (!game || !account || !isSolo) return false;
+        return turnPlayerAddress() === account;
     }
 
     function capAt(x: number, y: number): ChainCap | undefined {
@@ -106,7 +117,7 @@
 
     function myBenchCaps(): ChainCap[] {
         if (!game || !account) return [];
-        const turnOwner = game.turnCount % 2 === 0 ? game.player1 : game.player2;
+        const turnOwner = turnPlayerAddress()!;
         return benchCaps().filter(c => c.owner === turnOwner);
     }
 
@@ -120,23 +131,14 @@
         pendingMode = null;
     }
 
-    function startMove() {
-        if (selectedCapId == null) return;
-        pendingMode = 'move';
-    }
-    function startAttack() {
-        if (selectedCapId == null) return;
-        pendingMode = 'attack';
-    }
-    function startPlay() {
-        if (selectedCapId == null) return;
-        pendingMode = 'play';
-    }
+    function startMove() { if (selectedCapId != null) pendingMode = 'move'; }
+    function startAttack() { if (selectedCapId != null) pendingMode = 'attack'; }
+    function startPlay() { if (selectedCapId != null) pendingMode = 'play'; }
+    function startCapture() { if (selectedCapId != null) pendingMode = 'capture'; }
 
     function isDeploySpot(x: number, y: number): boolean {
         if (!game) return false;
-        const isP1 = game.turnCount % 2 === 0;
-        const [dx, dy] = isP1 ? activeLayout.p1Deploy : activeLayout.p2Deploy;
+        const [dx, dy] = game.turnCount % 2 === 0 ? activeLayout.p1Deploy : activeLayout.p2Deploy;
         return x === dx && y === dy;
     }
 
@@ -147,33 +149,51 @@
         const target = capAt(x, y);
 
         if (pendingMode === 'play') {
-            // Must be unoccupied and at deploy spot
             return !target && isDeploySpot(x, y);
         }
 
         const selectedCap = game.caps.find(c => c.id === selectedCapId);
-        if (!selectedCap || selectedCap.x === null || selectedCap.y === null) return false;
+        if (!selectedCap) return false;
+
+        if (pendingMode === 'capture') {
+            // Any of my on-board caps can claim; target must be surrounded enemy
+            if (selectedCap.x === null) return false;
+            if (!target) return false;
+            if (isSolo ? target.owner === turnPlayerAddress() : target.owner === account) return false;
+            return isSurrounded(game, x, y);
+        }
+
+        if (selectedCap.x === null || selectedCap.y === null) return false;
 
         if (pendingMode === 'move') {
-            // Must be unoccupied and valid 1-step (including diagonal)
             return !target && isValidStep(game.layout, [selectedCap.x, selectedCap.y], [x, y]);
         }
 
         if (pendingMode === 'attack') {
-            // Must be occupied by opponent
             if (!target) return false;
-            const isFriendly = game.player1 === game.player2
-                ? target.owner === selectedCap.owner
-                : target.owner === account;
-            if (isFriendly) return false;
+            if (isSolo ? target.owner === turnPlayerAddress() : target.owner === account) return false;
             const dx = Math.abs(selectedCap.x - x);
             const dy = Math.abs(selectedCap.y - y);
-            const chebyshevDist = Math.max(dx, dy);
             const attackRange = CAP_STATS[selectedCap.capType]?.[2] ?? 1;
-            return chebyshevDist <= attackRange;
+            return Math.max(dx, dy) <= attackRange;
         }
 
         return false;
+    }
+
+    function isCaptureTarget(x: number, y: number): boolean {
+        if (!game || !selectedCapId || pendingMode !== 'capture') return false;
+        return isCellValidTarget(x, y);
+    }
+
+    function anySurroundedEnemy(): boolean {
+        if (!game) return false;
+        const g = game;
+        return g.caps.some(c =>
+            c.x !== null && c.y !== null &&
+            (isSolo ? c.owner !== turnPlayerAddress() : c.owner !== account) &&
+            isSurrounded(g, c.x, c.y)
+        );
     }
 
     function onCellClick(x: number, y: number) {
@@ -193,13 +213,17 @@
             return;
         }
 
-        // Validate before queueing
         if (!isCellValidTarget(x, y)) {
             errorMsg = `Invalid ${pendingMode} target at (${x}, ${y})`;
             return;
         }
 
-        const kindMap = { move: 'Move', attack: 'Attack', play: 'Play' } as const;
+        const kindMap = {
+            move: 'Move',
+            attack: 'Attack',
+            play: 'Play',
+            capture: 'ClaimCapture',
+        } as const;
         queuedActions = [...queuedActions, { capId: selectedCapId, kind: kindMap[pendingMode], x, y }];
         status = `Queued ${pendingMode} → (${x},${y})`;
         errorMsg = null;
@@ -228,159 +252,412 @@
         }
     }
 
+    function removeQueuedAction(index: number) {
+        queuedActions = queuedActions.filter((_, i) => i !== index);
+    }
+
     onMount(() => {});
 </script>
 
+<svelte:head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0f172a" />
+</svelte:head>
+
 <div class="wrap">
-    <h1>Caps — Tactical Board</h1>
-
-    <div class="toolbar">
-        {#if !account}
-            <button onclick={handleConnect}>Connect Controller</button>
-        {:else}
+    <header class="topbar">
+        <h1>CAPS</h1>
+        {#if account}
             <span class="addr" title={account}>{account.slice(0, 6)}…{account.slice(-4)}</span>
-            <button onclick={handleConnect}>Reconnect</button>
         {/if}
-    </div>
+    </header>
 
-    <!-- Layout Picker -->
-    <div class="layout-picker">
-        <label for="layout-select">Layout:</label>
-        <select id="layout-select" bind:value={selectedLayout}>
-            {#each Object.values(LAYOUTS) as l}
-                <option value={l.id}>{l.name}</option>
-            {/each}
-        </select>
-    </div>
+    {#if !game}
+        <!-- Lobby -->
+        <section class="lobby">
+            {#if !account}
+                <button class="primary big" onclick={handleConnect}>Connect Controller</button>
+            {:else}
+                <div class="field">
+                    <label for="layout-select">Board Layout</label>
+                    <select id="layout-select" bind:value={selectedLayout}>
+                        {#each Object.values(LAYOUTS) as l}
+                            <option value={l.id}>{l.name}</option>
+                        {/each}
+                    </select>
+                    <p class="hint">{getLayout(selectedLayout).description}</p>
+                </div>
 
-    <div class="actions-row">
-        <button onclick={handleCreateSolo} disabled={!account}>Self-Play Game</button>
-        <div class="or">or</div>
-        <input bind:value={opponent} placeholder="Opponent address (p2)" />
-        <button onclick={handleCreate} disabled={!account}>Create vs P2</button>
-    </div>
+                <button class="primary big" onclick={handleCreateSolo}>🎮 Play Solo (Both Sides)</button>
 
-    <div class="load-row">
-        <input bind:value={gameIdInput} type="number" placeholder="Game id" />
-        <button onclick={handleLoad} disabled={!account}>Load Game</button>
-    </div>
+                <div class="divider"><span>or play vs opponent</span></div>
 
-    {#if errorMsg}
-        <div class="error">{errorMsg}</div>
-    {/if}
-    <div class="status">Status: {status}</div>
+                <div class="field">
+                    <label for="opp">Opponent Address</label>
+                    <input id="opp" bind:value={opponent} placeholder="0x…" />
+                </div>
+                <button class="big" onclick={handleCreate} disabled={!opponent.trim()}>Create Game</button>
 
-    {#if game}
-        <div class="meta">
-            <span>Game #{game.id}</span>
-            <span class="layout-tag">{activeLayout.name}</span>
-            <span>Turn {game.turnCount} ({game.turnCount % 2 === 0 ? 'P1 Blue' : 'P2 Red'})</span>
-            <span>{game.over ? (game.winner === '0' ? 'Draw' : `Winner: ${game.winner.slice(0, 6)}…`) : ''}</span>
-            {#if isMyTurn()}<span class="yourturn">Active Turn</span>{/if}
-        </div>
+                <div class="divider"><span>load existing</span></div>
 
-        {#if selectedCapId != null}
-            <div class="edit">
-                Selected cap #{selectedCapId}
-                <button onclick={startPlay} class:active-mode={pendingMode === 'play'}>Deploy</button>
-                <button onclick={startMove} class:active-mode={pendingMode === 'move'}>Move (1-step/diag)</button>
-                <button onclick={startAttack} class:active-mode={pendingMode === 'attack'}>Attack</button>
-                <button class="cancel-btn" onclick={() => { selectedCapId = null; pendingMode = null; }}>Cancel</button>
+                <div class="field row">
+                    <input bind:value={gameIdInput} type="number" placeholder="Game id" />
+                    <button onclick={handleLoad}>Load</button>
+                </div>
+            {/if}
+        </section>
+    {:else}
+        <!-- Game View -->
+        <section class="gameview">
+            <div class="meta">
+                <button class="back" onclick={() => { game = null; queuedActions = []; selectedCapId = null; pendingMode = null; }}>← Lobby</button>
+                <span class="badge">#{game.id}</span>
+                <span class="badge">{activeLayout.name}</span>
+                <span class="turn-badge {game.turnCount % 2 === 0 ? 'p1' : 'p2'}">
+                    {game.turnCount % 2 === 0 ? "P1's turn" : "P2's turn"}
+                </span>
             </div>
-        {/if}
 
-        <div class="board" style="--w:{activeLayout.width};--h:{activeLayout.height}">
-            {#each Array.from({ length: activeLayout.height * activeLayout.width }, (_, idx) => idx) as idx}
-                {@const x = idx % activeLayout.width}
-                {@const y = Math.floor(idx / activeLayout.width)}
-                {@const walkable = activeLayout.isWalkable(x, y)}
-                {@const isDeploy = isDeploySpot(x, y)}
-                {@const isValidTarget = isCellValidTarget(x, y)}
-                {@const c = capAt(x, y)}
-                <button
-                    class="cell"
-                    class:walkable={walkable}
-                    class:void-cell={!walkable}
-                    class:deploy={isDeploy && !c}
-                    class:valid-target={isValidTarget}
-                    class:selected={selectedCapId != null && c?.id === selectedCapId}
-                    disabled={!walkable}
-                    onclick={() => onCellClick(x, y)}
-                >
-                    {#if c}
-                        <div class="piece" style="background:{colorFor(c)}">
-                            <div class="type">{c.capType === 0 ? '★' : c.capType}</div>
-                            <div class="hp">{c.health}/{c.maxHealth}</div>
-                        </div>
-                    {:else if isDeploy}
-                        <div class="deploy-marker">↓</div>
-                    {:else if !walkable}
-                        <div class="void-marker">·</div>
-                    {/if}
-                </button>
-            {/each}
-        </div>
+            {#if game.over}
+                <div class="gameover">
+                    {game.winner === '0' ? 'Draw!' : `Winner: ${game.winner.slice(0, 10)}…`}
+                </div>
+            {/if}
 
-        {#if myBenchCaps().length > 0}
-            <div class="bench">
-                <span>Bench ({game.turnCount % 2 === 0 ? 'P1' : 'P2'}):</span>
-                {#each myBenchCaps() as c}
+            {#if isSolo && isMyTurn()}
+                <div class="solo-note">
+                    Playing both sides — currently controlling <b>{game.turnCount % 2 === 0 ? 'P1 (Blue)' : 'P2 (Red)'}</b>
+                </div>
+            {/if}
+
+            {#if errorMsg}
+                <div class="error">{errorMsg}</div>
+            {/if}
+
+            <!-- Board -->
+            <div class="board" style="--w:{activeLayout.width};--h:{activeLayout.height}">
+                {#each Array.from({ length: activeLayout.height * activeLayout.width }, (_, idx) => idx) as idx}
+                    {@const x = idx % activeLayout.width}
+                    {@const y = Math.floor(idx / activeLayout.width)}
+                    {@const walkable = activeLayout.isWalkable(x, y)}
+                    {@const isDeploy = isDeploySpot(x, y)}
+                    {@const isValidTarget = isCellValidTarget(x, y)}
+                    {@const c = capAt(x, y)}
+                    {@const capturable = c ? isSurrounded(game, x, y) && c.owner !== (isSolo ? turnPlayerAddress() : account) : false}
                     <button
-                        class="bench-piece"
-                        class:selected={selectedCapId === c.id}
-                        onclick={() => { selectedCapId = c.id; pendingMode = 'play'; }}
-                    >#{c.id} {c.capType === 0 ? '★ Tower' : `Type ${c.capType}`} ({c.health}hp)</button>
+                        class="cell"
+                        class:walkable={walkable}
+                        class:void-cell={!walkable}
+                        class:deploy={isDeploy && !c}
+                        class:valid-target={isValidTarget}
+                        class:capture-target={capturable && pendingMode === 'capture'}
+                        class:selected={selectedCapId != null && c?.id === selectedCapId}
+                        disabled={!walkable}
+                        onclick={() => onCellClick(x, y)}
+                    >
+                        {#if c}
+                            <div class="piece p{c.owner === game.player1 ? '1' : '2'}" class:tower={c.capType === 0}>
+                                <div class="type">{c.capType === 0 ? '★' : c.capType}</div>
+                                <div class="hp">{c.health}/{c.maxHealth}</div>
+                                {#if capturable}<div class="cap-mark">⛓</div>{/if}
+                            </div>
+                        {:else if isDeploy}
+                            <div class="deploy-marker">↓</div>
+                        {:else if !walkable}
+                            <div class="void-marker">·</div>
+                        {/if}
+                    </button>
                 {/each}
             </div>
-        {/if}
 
-        <button class="commit" onclick={commitTurn} disabled={queuedActions.length === 0 || committing}>
-            Submit Turn ({queuedActions.length} action{queuedActions.length === 1 ? '' : 's'})
-        </button>
+            <!-- Action Buttons -->
+            {#if selectedCapId != null}
+                <div class="actions">
+                    {#if capAt(0,0) && false}{/if}
+                    <button
+                        class:active-mode={pendingMode === 'play'}
+                        onclick={startPlay}
+                    >Deploy</button>
+                    <button
+                        class:active-mode={pendingMode === 'move'}
+                        onclick={startMove}
+                    >Move</button>
+                    <button
+                        class:active-mode={pendingMode === 'attack'}
+                        onclick={startAttack}
+                    >Attack</button>
+                    {#if anySurroundedEnemy()}
+                        <button
+                            class="capture-btn"
+                            class:active-mode={pendingMode === 'capture'}
+                            onclick={startCapture}
+                        >⛓ Capture</button>
+                    {/if}
+                    <button class="cancel" onclick={() => { selectedCapId = null; pendingMode = null; }}>✕</button>
+                </div>
+                <p class="hint">
+                    {#if pendingMode === 'play'}Tap your deploy spot (↓)
+                    {:else if pendingMode === 'move'}Tap a highlighted adjacent tile (orthogonal or diagonal)
+                    {:else if pendingMode === 'attack'}Tap a highlighted enemy
+                    {:else if pendingMode === 'capture'}Tap the chained enemy to send it back to bench
+                    {:else}Pick an action, or tap another piece
+                    {/if}
+                </p>
+            {/if}
+
+            <!-- Bench -->
+            {#if myBenchCaps().length > 0}
+                <div class="bench">
+                    <span class="bench-label">Bench ({game.turnCount % 2 === 0 ? 'P1' : 'P2'})</span>
+                    <div class="bench-pieces">
+                        {#each myBenchCaps() as c}
+                            <button
+                                class="bench-piece"
+                                class:selected={selectedCapId === c.id}
+                                onclick={() => { selectedCapId = c.id; pendingMode = 'play'; }}
+                            >{c.capType === 0 ? '★' : c.capType} · {c.health}hp</button>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
+
+            <!-- Queued Actions -->
+            {#if queuedActions.length > 0}
+                <div class="queued">
+                    {#each queuedActions as qa, i}
+                        <button class="queued-action" onclick={() => removeQueuedAction(i)}>
+                            {qa.kind === 'ClaimCapture' ? '⛓' : qa.kind} ({qa.x},{qa.y}) ✕
+                        </button>
+                    {/each}
+                </div>
+            {/if}
+
+            <!-- Commit -->
+            <button class="commit" onclick={commitTurn} disabled={queuedActions.length === 0 || committing}>
+                {committing ? 'Submitting…' : `Submit Turn (${queuedActions.length})`}
+            </button>
+        </section>
     {/if}
 </div>
 
 <style>
-    .wrap { font-family: system-ui, sans-serif; padding: 1rem; max-width: 440px; margin: 0 auto; color: #1e293b; }
-    h1 { margin: 0 0 1rem; font-size: 1.5rem; }
-    .toolbar, .layout-picker, .actions-row, .load-row, .meta, .edit, .bench { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
-    .layout-picker label { font-size: 0.9rem; font-weight: 600; color: #475569; }
-    .layout-picker select { padding: 0.35rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; font-size: 0.85rem; }
-    .or { color: #94a3b8; font-size: 0.85rem; }
-    input { padding: 0.4rem; border: 1px solid #cbd5e1; border-radius: 6px; }
-    button { padding: 0.4rem 0.8rem; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; font-weight: 500; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .addr { font-family: monospace; background: #f1f5f9; padding: 0.2rem 0.4rem; border-radius: 4px; border: 1px solid #e2e8f0; }
-    .error { color: #dc2626; margin-bottom: 0.5rem; font-size: 0.9rem; }
-    .status { color: #64748b; margin-bottom: 0.5rem; font-size: 0.9rem; }
-    .yourturn { color: #16a34a; font-weight: 600; }
-    .layout-tag { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.8rem; }
-    .edit { background: #eff6ff; padding: 0.5rem; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 0.9rem; }
-    .active-mode { background: #1d4ed8; outline: 2px solid #93c5fd; }
-    .cancel-btn { background: #64748b; }
+    :global(html, body) {
+        margin: 0;
+        padding: 0;
+        background: #0f172a;
+        color: #f1f5f9;
+        font-family: system-ui, -apple-system, sans-serif;
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .wrap {
+        max-width: 480px;
+        margin: 0 auto;
+        padding: 0.75rem;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+    }
+    .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75rem;
+    }
+    .topbar h1 { margin: 0; font-size: 1.5rem; letter-spacing: 0.15em; color: #38bdf8; }
+    .addr {
+        font-family: ui-monospace, monospace;
+        background: #1e293b;
+        padding: 0.25rem 0.5rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        border: 1px solid #334155;
+    }
+
+    /* Lobby */
+    .lobby { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 1rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field.row { flex-direction: row; align-items: center; gap: 0.5rem; }
+    .field label { font-size: 0.8rem; font-weight: 600; color: #94a3b8; }
+    input, select {
+        padding: 0.7rem;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        background: #1e293b;
+        color: #f1f5f9;
+        font-size: 1rem;
+        min-width: 0;
+        flex: 1;
+    }
+    .hint { font-size: 0.75rem; color: #64748b; margin: 0.15rem 0 0; }
+    .divider {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: #475569;
+        font-size: 0.75rem;
+        margin: 0.25rem 0;
+    }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #334155; }
+
+    button {
+        padding: 0.7rem 1rem;
+        border: none;
+        border-radius: 8px;
+        background: #334155;
+        color: #f1f5f9;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
+        touch-action: manipulation;
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.primary { background: #2563eb; }
+    button.big { padding: 1rem; font-size: 1.05rem; }
+
+    /* Game View */
+    .gameview { display: flex; flex-direction: column; gap: 0.6rem; }
+    .meta { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .back { padding: 0.35rem 0.7rem; background: #1e293b; font-size: 0.85rem; }
+    .badge {
+        background: #1e293b;
+        border: 1px solid #334155;
+        padding: 0.2rem 0.55rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+    }
+    .turn-badge { padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.8rem; font-weight: 700; }
+    .turn-badge.p1 { background: #1d4ed8; }
+    .turn-badge.p2 { background: #b91c1c; }
+    .solo-note {
+        background: #172554;
+        border: 1px solid #1d4ed8;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+    }
+    .gameover {
+        background: #052e16;
+        border: 1px solid #16a34a;
+        border-radius: 8px;
+        padding: 0.75rem;
+        text-align: center;
+        font-weight: 700;
+        font-size: 1.1rem;
+    }
+    .error {
+        background: #450a0a;
+        border: 1px solid #dc2626;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+        color: #fecaca;
+    }
+
+    /* Board */
     .board {
         display: grid;
-        grid-template-columns: repeat(var(--w), 64px);
-        grid-template-rows: repeat(var(--h), 64px);
+        grid-template-columns: repeat(var(--w), minmax(0, 1fr));
+        grid-template-rows: repeat(var(--h), minmax(0, 1fr));
         gap: 3px;
-        margin: 1rem 0;
-        background: #e2e8f0;
-        padding: 6px;
-        border-radius: 8px;
+        background: #1e293b;
+        padding: 5px;
+        border-radius: 10px;
+        aspect-ratio: var(--w) / var(--h);
+        max-width: 100%;
     }
-    .cell { width: 64px; height: 64px; border: 1px solid #cbd5e1; background: #ffffff; padding: 2px; border-radius: 4px; position: relative; }
-    .cell.void-cell { background: #f8fafc; border: 1px dashed #e2e8f0; opacity: 0.4; }
-    .cell.walkable { background: #ffffff; border-color: #94a3b8; }
-    .cell.deploy { border: 2px solid #3b82f6; background: #f0f9ff; }
-    .cell.valid-target { border-color: #22c55e; background: #f0fdf4; box-shadow: inset 0 0 6px #86efac; cursor: pointer; }
-    .cell.selected { border-color: #2563eb; outline: 2px solid #2563eb; }
-    .deploy-marker { color: #3b82f6; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; height: 100%; }
-    .void-marker { color: #cbd5e1; font-size: 1.5rem; display: flex; align-items: center; justify-content: center; height: 100%; }
-    .piece { width: 100%; height: 100%; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; }
-    .type { font-size: 1.1rem; font-weight: 700; }
-    .hp { font-size: 0.7rem; background: rgba(0,0,0,0.35); padding: 0 0.3rem; border-radius: 4px; }
-    .bench { margin-bottom: 1rem; }
-    .bench-piece { background: #7c3aed; font-size: 0.85rem; }
-    .bench-piece.selected { outline: 2px solid #1e1b4b; }
-    .commit { background: #16a34a; padding: 0.6rem 1.2rem; font-size: 1rem; width: 100%; }
+    .cell {
+        border: 1px solid #334155;
+        background: #0f172a;
+        border-radius: 6px;
+        padding: 0;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 0;
+        min-width: 0;
+    }
+    .cell.void-cell { opacity: 0.25; border-style: dashed; background: transparent; }
+    .cell.walkable { background: #1e293b; }
+    .cell.deploy { border: 2px solid #38bdf8; }
+    .cell.valid-target { border-color: #22c55e; box-shadow: inset 0 0 8px rgba(34,197,94,0.35); }
+    .cell.capture-target { border-color: #a855f7; box-shadow: inset 0 0 8px rgba(168,85,247,0.45); }
+    .cell.selected { outline: 2px solid #38bdf8; outline-offset: -2px; }
+
+    .deploy-marker { color: #38bdf8; font-size: clamp(1rem, 5vw, 1.6rem); font-weight: bold; }
+    .void-marker { color: #334155; font-size: clamp(0.8rem, 4vw, 1.3rem); }
+
+    .piece {
+        width: 100%;
+        height: 100%;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+    .piece.p1 { background: #2563eb; }
+    .piece.p2 { background: #dc2626; }
+    .piece.tower { border-radius: 6px 6px 24px 24px; }
+    .type { font-size: clamp(0.9rem, 4.5vw, 1.4rem); font-weight: 800; color: #fff; line-height: 1; }
+    .hp {
+        font-size: clamp(0.55rem, 2.5vw, 0.75rem);
+        background: rgba(0,0,0,0.4);
+        padding: 0 0.3rem;
+        border-radius: 4px;
+        color: #fff;
+        margin-top: 2px;
+    }
+    .cap-mark {
+        position: absolute;
+        top: 1px;
+        right: 2px;
+        font-size: 0.8rem;
+    }
+
+    /* Actions */
+    .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .actions button { flex: 1; min-width: 70px; padding: 0.6rem 0.4rem; font-size: 0.85rem; background: #1e293b; border: 1px solid #334155; }
+    .actions button.active-mode { background: #2563eb; border-color: #38bdf8; }
+    .actions .capture-btn { background: #4c1d95; border-color: #7c3aed; }
+    .actions .capture-btn.active-mode { background: #7c3aed; }
+    .actions .cancel { flex: 0 0 auto; background: #475569; }
+
+    /* Bench */
+    .bench { display: flex; flex-direction: column; gap: 0.3rem; }
+    .bench-label { font-size: 0.75rem; color: #94a3b8; font-weight: 600; }
+    .bench-pieces { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .bench-piece {
+        background: #4c1d95;
+        border: 1px solid #7c3aed;
+        padding: 0.5rem 0.8rem;
+        font-size: 0.85rem;
+    }
+    .bench-piece.selected { outline: 2px solid #c4b5fd; }
+
+    /* Queued */
+    .queued { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .queued-action {
+        background: #164e3a;
+        border: 1px solid #16a34a;
+        font-size: 0.78rem;
+        padding: 0.4rem 0.6rem;
+    }
+
+    .commit {
+        background: #16a34a;
+        padding: 0.9rem;
+        font-size: 1.05rem;
+        width: 100%;
+        margin-top: auto;
+    }
+    .commit:disabled { background: #14532d; }
+
+    /* Small phone tweaks */
+    @media (max-width: 380px) {
+        .actions button { font-size: 0.78rem; min-width: 58px; }
+        .bench-piece { padding: 0.4rem 0.6rem; font-size: 0.78rem; }
+    }
 </style>

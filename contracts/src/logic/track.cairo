@@ -67,3 +67,34 @@ pub fn is_valid_step(layout: u8, from: Vec2, to: Vec2) -> bool {
     // Chebyshev distance == 1 means adjacent (orthogonal or diagonal)
     dx <= 1 && dy <= 1
 }
+
+/// Returns true if `target_pos` has no free escape route along the layout.
+/// A route is blocked if the adjacent walkable neighbor is out-of-bounds, non-walkable,
+/// or occupied by an enemy cap.
+/// Surrounding condition: For all 8 adjacent directions that are walkable in the layout,
+/// every one must be occupied by an opponent of `target_owner`.
+pub fn get_walkable_neighbors(layout: u8, pos: Vec2) -> Array<Vec2> {
+    let mut neighbors = ArrayTrait::new();
+    let (w, h) = get_board_dimensions(layout);
+
+    let mut dx_i: i16 = -1;
+    while dx_i <= 1 {
+        let mut dy_i: i16 = -1;
+        while dy_i <= 1 {
+            if !(dx_i == 0 && dy_i == 0) {
+                let nx: i16 = pos.x.into() + dx_i;
+                let ny: i16 = pos.y.into() + dy_i;
+                if nx >= 0 && nx < w.into() && ny >= 0 && ny < h.into() {
+                    let n_pos = Vec2 { x: nx.try_into().unwrap(), y: ny.try_into().unwrap() };
+                    if is_walkable(layout, n_pos) {
+                        neighbors.append(n_pos);
+                    }
+                }
+            }
+            dy_i += 1;
+        };
+        dx_i += 1;
+    };
+
+    neighbors
+}

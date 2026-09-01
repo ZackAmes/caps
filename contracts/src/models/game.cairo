@@ -33,6 +33,8 @@ pub enum ActionType {
     Play: Vec2,
     Move: Vec2,
     Attack: Vec2,
+    /// Claim a capture: sends a fully-surrounded enemy cap at `Vec2` back to bench.
+    ClaimCapture: Vec2,
 }
 
 #[derive(Copy, Drop, Serde, PartialEq, DojoStore, Debug, Introspect)]

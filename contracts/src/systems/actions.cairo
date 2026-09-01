@@ -1,8 +1,8 @@
-use caps::models::game::{Game, Action, Vec2, Global};
+use caps::models::game::{Game, Action, Vec2};
 use caps::models::cap::{Cap, Location};
 use caps::logic::track::{
     is_walkable, get_p1_deploy_spot, get_p2_deploy_spot, is_valid_step,
-    LAYOUT_PERIMETER_5X5,
+    get_walkable_neighbors, LAYOUT_PERIMETER_5X5,
 };
 use starknet::ContractAddress;
 
@@ -45,15 +45,54 @@ fn has_cap_at(caps: @Array<Cap>, pos: Vec2) -> bool {
     index_at(caps, pos) < caps.len()
 }
 
+/// True if the cap at `pos` is fully surrounded:
+/// every walkable neighbor of `pos` is occupied by a cap belonging to the
+/// opponent of the surrounded cap (unclaimed tiles, bench/dead caps, and friendly
+/// caps don't count as blockers).
+fn is_surrounded(caps: @Array<Cap>, layout: u8, pos: Vec2) -> bool {
+    let idx = index_at(caps, pos);
+    if idx >= caps.len() {
+        return false;
+    }
+    let target: Cap = *caps.at(idx);
+    if target.cap_type == 0 {
+        // Towers cannot be captured by surrounding; they must be destroyed.
+        return false;
+    }
+
+    let neighbors = get_walkable_neighbors(layout, pos);
+    if neighbors.len() == 0 {
+        return false;
+    }
+
+    let mut n: usize = 0;
+    while n < neighbors.len() {
+        let npos = *neighbors.at(n);
+        let nidx = index_at(caps, npos);
+        if nidx >= caps.len() {
+            // Free escape tile exists -> not surrounded
+            return false;
+        }
+        let blocker: Cap = *caps.at(nidx);
+        if blocker.owner == target.owner {
+            // A friendly cap adjacent does not block escape
+            return false;
+        }
+        n += 1;
+    };
+
+    true
+}
+
 #[dojo::contract]
 pub mod actions {
     use super::{
-        IActions, index_at, index_of_id, has_cap_at, is_walkable,
+        IActions, index_at, index_of_id, has_cap_at, is_surrounded, is_walkable,
         get_p1_deploy_spot, get_p2_deploy_spot, is_valid_step,
         LAYOUT_PERIMETER_5X5,
     };
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
-    use caps::models::game::{Game, Global, Action, Vec2, ActionType};
+    use caps::models::game::{Game, Global, Action, ActionType};
     use caps::models::cap::{
         Cap, Location, cap_stats, dist, get_position,
     };
@@ -171,6 +210,24 @@ pub mod actions {
                         if target.health == 0 {
                             target.location = Location::Dead;
                         }
+                        world.write_model(@target);
+                    },
+                    ActionType::ClaimCapture(pos) => {
+                        assert!(cap.location != Location::Bench, "Not on board");
+                        let tgt_idx = index_at(@caps, pos);
+                        assert!(tgt_idx < caps.len(), "No target on tile");
+                        let mut target: Cap = *caps.at(tgt_idx);
+                        assert!(target.owner != caller, "Cannot capture your own cap");
+
+                        assert!(
+                            is_surrounded(@caps, layout, pos),
+                            "Target is not surrounded",
+                        );
+
+                        // Send the surrounded cap back to bench with full health.
+                        target.location = Location::Bench;
+                        let (max_hp, _, _, _) = cap_stats(target.cap_type);
+                        target.health = max_hp;
                         world.write_model(@target);
                     },
                 }
