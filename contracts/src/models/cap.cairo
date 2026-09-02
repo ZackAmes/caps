@@ -1,4 +1,4 @@
-use caps::models::game::{Vec2};
+use caps::models::game::Vec2;
 
 /// A cap (piece) on the board or bench.
 #[derive(Copy, Drop, Serde, Debug)]
@@ -7,10 +7,17 @@ pub struct Cap {
     #[key]
     pub id: u64,
     pub owner: felt252,
-    pub cap_type: u8,
+    /// Piece type id within the game's set.
+    pub cap_type: u16,
+    /// Which set contract defines this piece.
+    pub set_id: u64,
     /// Bench, Board(Vec2), or Dead.
     pub location: Location,
     pub health: u16,
+    /// Absorbs damage before health. Granted by Shield ops/effects.
+    pub shield: u16,
+    /// Turns remaining on the cap's stun.
+    pub stunned_turns: u8,
 }
 
 #[derive(Copy, Drop, Serde, PartialEq, DojoStore, Default, Debug, Introspect)]
@@ -21,23 +28,7 @@ pub enum Location {
     Dead,
 }
 
-/// Simple static per-type stats: (max_health, attack, attack_range, move_range).
-/// Type 0 is the tower; 1-3 are basic units.
-pub fn cap_stats(cap_type: u8) -> (u16, u16, u8, u8) {
-    match cap_type {
-        0 => (12, 2, 1, 1), // Tower: tanky, short range
-        1 => (8, 2, 1, 1),  // Knight: balanced
-        2 => (8, 3, 1, 2),  // Archer: longer attack range
-        3 => (6, 3, 2, 1),  // Assassin: longer move range
-        _ => (8, 2, 1, 1),
-    }
-}
-
-pub fn is_tower(cap_type: u8) -> bool {
-    cap_type == 0
-}
-
-/// Chebyshev distance between two cells (for attack range & diagonal steps).
+/// Chebyshev distance between two cells (for adjacency & range checks).
 pub fn dist(a: Vec2, b: Vec2) -> u32 {
     let dx: u32 = if a.x > b.x { (a.x - b.x).into() } else { (b.x - a.x).into() };
     let dy: u32 = if a.y > b.y { (a.y - b.y).into() } else { (b.y - a.y).into() };
@@ -49,5 +40,13 @@ pub fn get_position(cap: @Cap) -> Option<Vec2> {
     match (*cap).location {
         Location::Board(v) => Option::Some(v),
         _ => Option::None,
+    }
+}
+
+/// Is this cap on the board (not bench, not dead)?
+pub fn is_on_board(cap: @Cap) -> bool {
+    match (*cap).location {
+        Location::Board(_) => true,
+        _ => false,
     }
 }

@@ -6,6 +6,8 @@ use caps::logic::track::{
 };
 use starknet::ContractAddress;
 
+use caps::models::set_data::CapType;
+
 #[starknet::interface]
 pub trait IActions<T> {
     fn create_game(ref self: T, p2: ContractAddress) -> u64;
@@ -14,6 +16,8 @@ pub trait IActions<T> {
     fn create_solo_game_with_layout(ref self: T, layout: u8) -> u64;
     fn take_turn(ref self: T, game_id: u64, turn: Array<Action>);
     fn get_game(self: @T, game_id: u64) -> Option<(Game, Span<Cap>)>;
+    /// Fetch a piece definition from the game's set contract.
+    fn get_cap_data(self: @T, game_id: u64, cap_type_id: u16) -> Option<CapType>;
 }
 
 /// Position helpers (no world access needed).
@@ -93,9 +97,9 @@ pub mod actions {
     };
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use caps::models::game::{Game, Global, Action, ActionType};
-    use caps::models::cap::{
-        Cap, Location, cap_stats, dist, get_position,
-    };
+    use caps::models::cap::{Cap, Location, get_position};
+    use caps::models::set::{Set, ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait};
+    use caps::models::set_data::{CapType, ActorInfo, CapInfo};
     use dojo::model::ModelStorage;
 
     pub const TEAM_SIZE: u8 = 6;
@@ -194,21 +198,30 @@ pub mod actions {
                             let mut target: Cap = *caps.at(tgt_idx);
                             assert!(target.id != cap.id, "Cannot attack self");
                             assert!(target.owner != caller, "Tile is occupied by your own cap");
-                            let (_, atk, _, _) = cap_stats(cap.cap_type);
-                            if target.health > atk {
-                                target.health -= atk;
+                            let (_, _, _, atk) = self._stats(game.set_id, cap.cap_type);
+                            if target.shield >= atk {
+                                target.shield -= atk;
                             } else {
-                                target.health = 0;
-                            }
-                            if target.health == 0 {
-                                target.location = Location::Dead;
-                                cap.location = Location::Board(pos);
+                                let through = atk - target.shield;
+                                target.shield = 0;
+                                if target.health > through {
+                                    target.health -= through;
+                                } else {
+                                    target.health = 0;
+                                    target.location = Location::Dead;
+                                    cap.location = Location::Board(pos);
+                                }
                             }
                             world.write_model(@target);
                         } else {
                             cap.location = Location::Board(pos);
                         }
                         world.write_model(@cap);
+                    },
+                    ActionType::Ability(pos) => {
+                        // v1: abilities stubbed — set contract dispatch lands
+                        // with the set_zero port. The op applier is live.
+                        let _ = pos;
                     },
                     ActionType::ClaimCapture(pos) => {
                         assert!(cap.location != Location::Bench, "Not on board");
@@ -224,8 +237,9 @@ pub mod actions {
 
                         // Send the surrounded cap back to bench with full health.
                         target.location = Location::Bench;
-                        let (max_hp, _, _, _) = cap_stats(target.cap_type);
+                        let (max_hp, _, _, _) = self._stats(game.set_id, target.cap_type);
                         target.health = max_hp;
+                        target.shield = 0;
                         world.write_model(@target);
                     },
                 }
@@ -285,6 +299,16 @@ pub mod actions {
             };
             Option::Some((game, caps.span()))
         }
+
+        fn get_cap_data(
+            self: @ContractState, game_id: u64, cap_type_id: u16,
+        ) -> Option<CapType> {
+            let world = self.world_default();
+            let game: Game = world.read_model(game_id);
+            let set: Set = world.read_model(game.set_id);
+            let dispatcher = ISetInterfaceDispatcher { contract_address: set.address };
+            dispatcher.get_cap_type(cap_type_id)
+        }
     }
 
     #[generate_trait]
@@ -309,10 +333,13 @@ pub mod actions {
                 player1: p1_felt,
                 player2: p2_felt,
                 layout: layout,
+                set_id: 0,
                 turn_count: 0,
                 over: false,
                 winner: 0,
                 caps_ids: ArrayTrait::new(),
+                effect_ids: ArrayTrait::new(),
+                energy: 0,
                 last_action_timestamp: 0,
             };
 
@@ -320,16 +347,19 @@ pub mod actions {
 
             let mut i: u8 = 0;
             while i < TEAM_SIZE {
-                let cap_type: u8 = if i == 0 { 0 } else { i };
-                let (hp, _, _, _) = cap_stats(cap_type);
+                let cap_type: u16 = if i == 0 { 0 } else { i.into() };
+                let (hp, _, _, _) = self._stats(game.set_id, cap_type);
 
                 cap_counter += 1;
                 let cap1 = Cap {
                     id: cap_counter,
                     owner: p1_felt,
-                    cap_type: cap_type,
+                    cap_type,
+                    set_id: game.set_id,
                     location: Location::Bench,
                     health: hp,
+                    shield: 0,
+                    stunned_turns: 0,
                 };
                 world.write_model(@cap1);
                 game.caps_ids.append(cap1.id);
@@ -338,9 +368,12 @@ pub mod actions {
                 let cap2 = Cap {
                     id: cap_counter,
                     owner: p2_felt,
-                    cap_type: cap_type,
+                    cap_type,
+                    set_id: game.set_id,
                     location: Location::Bench,
                     health: hp,
+                    shield: 0,
+                    stunned_turns: 0,
                 };
                 world.write_model(@cap2);
                 game.caps_ids.append(cap2.id);
@@ -353,6 +386,29 @@ pub mod actions {
             world.write_model(@global);
 
             game_id
+        }
+
+        /// Fetch stats from the game's set contract. Falls back to v1
+        /// stats if the set doesn't define the type (never happens for
+        /// registered sets, but keeps the compiler happy).
+        fn _stats(
+            ref self: ContractState, set_id: u64, cap_type: u16,
+        ) -> (u16, u8, u8, u16) {
+            let world = self.world_default();
+            let set: Set = world.read_model(set_id);
+            let dispatcher = ISetInterfaceDispatcher { contract_address: set.address };
+            match dispatcher.get_cap_type(cap_type) {
+                Option::Some(ct) => (ct.max_health, ct.play_cost, ct.move_cost, ct.attack),
+                Option::None => (8, 1, 1, 2),
+            }
+        }
+
+        fn _stats_attack(ref self: ContractState, set_id: u64, cap_type: u16) -> u16 {
+            2
+        }
+
+        fn _stats_max_health(ref self: ContractState, set_id: u64, cap_type: u16) -> u16 {
+            8
         }
 
         fn world_default(self: @ContractState) -> dojo::world::WorldStorage {
