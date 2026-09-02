@@ -157,42 +157,52 @@ sequentially as each action resolves.
 
 ## 6. ISetInterface — the extensibility boundary
 
+Sets are **pure functions**: they receive a snapshot of relevant state and
+return a list of **SetOps** (state-mutation intents) plus client-facing
+events. They never receive world access, never receive mutable state, and
+cannot do anything outside the op vocabulary.
+
 ```cairo
 #[starknet::interface]
 pub trait ISetInterface<T> {
-    /// Core asks: what are the stats/ability-meta for piece type `id`?
+    /// Piece definitions (stats/ability metadata) owned by the set.
     fn get_cap_type(self: @T, id: u16) -> Option<CapType>;
 
-    /// Core asks (after validating target legality): execute the ability.
-    /// Returns the game state mutated by the ability + effects to store.
+    /// Execute an ability. Snapshot in, ops out. Pure function.
     fn activate_ability(
-        ref self: T,
-        cap: Cap,                // the acting piece
-        target: Vec2,            // validated target
-        game: Game,              // current game state
-        caps: Array<Cap>,        // all live caps (read-only view)
-    ) -> (Game, Array<Effect>, Array<Cap>);
+        self: @T,
+        ctx: AbilityContext,      // game/actor/caps/effects snapshot
+        target: Vec2,             // pre-validated by the core
+    ) -> SetOutput;               // { ops: Span<SetOp>, events: Span<SetEvent> }
 }
 ```
 
-`Game.set_address` points at the set contract for that game. The core
-dispatches through `ISetInterfaceDispatcher`. **A community set contract
-implementing just these two functions is a fully legal piece set.**
+The complete op vocabulary (Damage, Heal, Shield, Push, Teleport, Swap,
+Summon, ApplyEffect, TerrainEffect, …), per-op validation rules, budgets,
+and worked examples live in **[SET_OPS.md](./SET_OPS.md)**.
 
-### Trust model
+### Why ops instead of returning full mutated state
 
-The set contract receives `Game` and `Array<Cap>` **by value** and returns
-mutated copies. This is the original design's key safety trick: the set
-contract cannot touch world storage directly. It can only:
+Returning `Game`/`Array<Cap>` copies (Option A) would give set authors
+maximum freedom, but the core would then need to re-validate every field to
+prevent state corruption — and that validator *is* an implicit op
+vocabulary, just undocumented and discovered by trial and error. Making the
+vocabulary explicit (Option B) means:
 
-- Modify the returned `Game`/`Cap` copies (which the core re-validates and
-  writes)
-- Emit new `Effect`s (which the core stores and ticks)
+- **Validation is bounded** — per-op checks (existence, occupancy, clamping)
+  instead of whole-state re-verification
+- **Sets are auditable** — what a set does is a readable op list, not
+  arbitrary Cairo; "what could this set do to my game?" has a exact answer
+- **Governance has a lever** — the vocabulary is the constitution; new
+  mechanics arrive as proposed ops, ratified by vote
+- **Sets are simulatable** — pure `(context, target) → ops` functions can
+  run client-side for preview and replay
+- **Blast radius is bounded** — a buggy/malicious set cannot corrupt other
+  players' games or the world
 
-The core should re-validate the returned state (health bounds, legal
-positions) before writing. Set contracts are sandboxed computation, not
-trusted authority. For full decentralization, set contracts should be
-verified/open-source; for friend games, any contract works.
+The cost — novel mechanics wait on a core upgrade — is the point: new state
+mutations should require process, not trust. See SET_OPS.md §8 for the full
+governance surface.
 
 ## 7. Ability execution flow (per turn)
 
