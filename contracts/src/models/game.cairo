@@ -31,8 +31,9 @@ pub struct Action {
 #[derive(Drop, Serde, Copy, Introspect)]
 pub enum ActionType {
     Play: Vec2,
+    /// Move 1 step. Moving onto an enemy tile attacks it: if it dies the
+    /// mover takes the tile, otherwise the mover stays put.
     Move: Vec2,
-    Attack: Vec2,
     /// Claim a capture: sends a fully-surrounded enemy cap at `Vec2` back to bench.
     ClaimCapture: Vec2,
 }

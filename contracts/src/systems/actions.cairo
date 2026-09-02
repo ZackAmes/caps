@@ -181,36 +181,34 @@ pub mod actions {
                         assert!(cap.location != Location::Bench, "Not on board");
                         let cur = get_position(@cap).unwrap();
                         assert!(is_walkable(layout, cur), "Current pos not on layout");
-                        assert!(!has_cap_at(@caps, pos), "Tile is occupied");
 
                         assert!(
                             is_valid_step(layout, cur, pos),
                             "Must move 1 step (orthogonal or diagonal) along layout",
                         );
-                        cap.location = Location::Board(pos);
-                        world.write_model(@cap);
-                    },
-                    ActionType::Attack(pos) => {
-                        assert!(is_walkable(layout, pos), "Target tile not on layout");
-                        let (_, atk, attack_range, _) = cap_stats(cap.cap_type);
-                        assert!(cap.location != Location::Bench, "Not on board");
-                        let cur = get_position(@cap).unwrap();
-                        assert!(dist(cur, pos) <= attack_range.into(), "Attack out of range");
+
                         let tgt_idx = index_at(@caps, pos);
-                        assert!(tgt_idx < caps.len(), "No target on tile");
-                        let mut target: Cap = *caps.at(tgt_idx);
-                        assert!(target.id != cap.id, "Cannot attack self");
-                        assert!(target.owner != caller, "Cannot attack your own cap");
-                        let dmg: u16 = atk;
-                        if target.health > dmg {
-                            target.health -= dmg;
+                        if tgt_idx < caps.len() {
+                            // Moving onto an enemy attacks it. If it dies the
+                            // mover takes the tile; otherwise the mover stays.
+                            let mut target: Cap = *caps.at(tgt_idx);
+                            assert!(target.id != cap.id, "Cannot attack self");
+                            assert!(target.owner != caller, "Tile is occupied by your own cap");
+                            let (_, atk, _, _) = cap_stats(cap.cap_type);
+                            if target.health > atk {
+                                target.health -= atk;
+                            } else {
+                                target.health = 0;
+                            }
+                            if target.health == 0 {
+                                target.location = Location::Dead;
+                                cap.location = Location::Board(pos);
+                            }
+                            world.write_model(@target);
                         } else {
-                            target.health = 0;
+                            cap.location = Location::Board(pos);
                         }
-                        if target.health == 0 {
-                            target.location = Location::Dead;
-                        }
-                        world.write_model(@target);
+                        world.write_model(@cap);
                     },
                     ActionType::ClaimCapture(pos) => {
                         assert!(cap.location != Location::Bench, "Not on board");
