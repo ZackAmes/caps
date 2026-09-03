@@ -1,8 +1,8 @@
 {
   "world": {
     "class_hash": "0x613551abceb2b37073b1149bb862ea70cf029981ce1ca47e9dd7c7ab97cb65d",
-    "address": "0x47fabe50e9c94be9a7cde807353436a048fabf70d82e150a44ec0115df4e279",
-    "seed": "caps-capture-world-2026-09-01",
+    "address": "0x7386aa7ec122e4b8a24de981c6317a9963885c6977974de672dfa9a738970df",
+    "seed": "caps-effects-2026-09-03",
     "name": "Caps vibe jam",
     "entrypoints": [
       "uuid",
@@ -33,8 +33,8 @@
   },
   "contracts": [
     {
-      "address": "0x339f8535aa8a4684e4c3548b614c513acbd9c6e1570f13e01d3f834d3df8038",
-      "class_hash": "0x5ef4719adcf6b3a307f32232f40b93f92272b9791baa2cdbb0805efd2f4fff4",
+      "address": "0x595529996c02ab0520ceeba845944bc8be502ddb1678ffd313856a54a886baf",
+      "class_hash": "0x6d66b17e9181abe077bfb8333b7975be37399354e975a8e129b91de3af78dee",
       "init_calldata": [],
       "tag": "caps-actions",
       "selector": "0x482dc9f44e8c68f3ef3ab58497e0d8e446ad2581a5544512fbaebef3af3ccbc",
@@ -64,7 +64,12 @@
         },
         {
           "name": "cap_type",
-          "type": "core::integer::u8",
+          "type": "core::integer::u16",
+          "key": false
+        },
+        {
+          "name": "set_id",
+          "type": "core::integer::u64",
           "key": false
         },
         {
@@ -76,11 +81,53 @@
           "name": "health",
           "type": "core::integer::u16",
           "key": false
+        },
+        {
+          "name": "shield",
+          "type": "core::integer::u16",
+          "key": false
+        },
+        {
+          "name": "stunned_turns",
+          "type": "core::integer::u8",
+          "key": false
         }
       ],
-      "class_hash": "0x2d8b57c30aa061d22e6c0a882df5b9c44e9d35448d9d658a76a3b8bb4a007c5",
+      "class_hash": "0x66648cbf9e2209fa00e1021765dc24332cbda2e92f36af58e274b53f987a7db",
       "tag": "caps-Cap",
       "selector": "0x4666b6027dbc8acd7fcac4489890ab6bb23d5b080ad517c26a6f8b3b551c37f"
+    },
+    {
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "effect_id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "effect_type",
+          "type": "caps::models::effect::EffectType",
+          "key": false
+        },
+        {
+          "name": "target",
+          "type": "caps::models::effect::EffectTarget",
+          "key": false
+        },
+        {
+          "name": "remaining_triggers",
+          "type": "core::integer::u8",
+          "key": false
+        }
+      ],
+      "class_hash": "0xbdd42e686ec0fa5994b6b6501840849995130014b1d73c9025c2eecb13ed75",
+      "tag": "caps-Effect",
+      "selector": "0x224ce3db691874cd4a155cc1059d391c9d2cabec2e98b100233ce6365221dd8"
     },
     {
       "members": [
@@ -105,6 +152,11 @@
           "key": false
         },
         {
+          "name": "set_id",
+          "type": "core::integer::u64",
+          "key": false
+        },
+        {
           "name": "turn_count",
           "type": "core::integer::u64",
           "key": false
@@ -125,12 +177,22 @@
           "key": false
         },
         {
+          "name": "effect_ids",
+          "type": "core::array::Array::<core::integer::u64>",
+          "key": false
+        },
+        {
+          "name": "energy",
+          "type": "core::integer::u8",
+          "key": false
+        },
+        {
           "name": "last_action_timestamp",
           "type": "core::integer::u64",
           "key": false
         }
       ],
-      "class_hash": "0x4578f4fdc2b8d7197d0da34dbef0695f376788dd9b3e2016a1770370e0c32af",
+      "class_hash": "0x4fad7096427f5d0e1dfc2390791f500f7d4805d1466a9749e93632c2e94f333",
       "tag": "caps-Game",
       "selector": "0xe9697c6c427792aaa8a422a17897c4b838d7d6c76261f43cce21228c294477"
     },
@@ -150,11 +212,48 @@
           "name": "cap_counter",
           "type": "core::integer::u64",
           "key": false
+        },
+        {
+          "name": "sets_counter",
+          "type": "core::integer::u64",
+          "key": false
         }
       ],
-      "class_hash": "0x3b74e73d1307a036f0cd7dd7a50b602e7ed975d90258c5cf4b9f3d7da448423",
+      "class_hash": "0x4d0876dfb01191cbf604ba30a0ffd1de6fa3533bffd14b0a7d7ee04ad3238d6",
       "tag": "caps-Global",
       "selector": "0x70e88df3f805a04831adfefc6e7231dc9a65cce7920bf65bcb51e6f0bf729c4"
+    },
+    {
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "address",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "key": false
+        },
+        {
+          "name": "max_on_board",
+          "type": "core::integer::u8",
+          "key": false
+        },
+        {
+          "name": "max_cap_types",
+          "type": "core::integer::u16",
+          "key": false
+        },
+        {
+          "name": "max_ops_per_ability",
+          "type": "core::integer::u8",
+          "key": false
+        }
+      ],
+      "class_hash": "0x6778f81bdd0027d751bd00e13fad8db46f21e80efd9932b8b7b7edf581ba2e8",
+      "tag": "caps-Set",
+      "selector": "0x5040dc1ca1ab78c673c858a24c5ea02dd0ed6ba32750672e582b101b3399235"
     }
   ],
   "events": [],
@@ -174,7 +273,11 @@
         },
         {
           "name": "cap_type",
-          "type": "core::integer::u8"
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "set_id",
+          "type": "core::integer::u64"
         },
         {
           "name": "location",
@@ -183,6 +286,14 @@
         {
           "name": "health",
           "type": "core::integer::u16"
+        },
+        {
+          "name": "shield",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "stunned_turns",
+          "type": "core::integer::u8"
         }
       ]
     },
@@ -196,7 +307,11 @@
         },
         {
           "name": "cap_type",
-          "type": "core::integer::u8"
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "set_id",
+          "type": "core::integer::u64"
         },
         {
           "name": "location",
@@ -205,6 +320,14 @@
         {
           "name": "health",
           "type": "core::integer::u16"
+        },
+        {
+          "name": "shield",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "stunned_turns",
+          "type": "core::integer::u8"
         }
       ]
     },
@@ -229,6 +352,136 @@
     {
       "type": "event",
       "name": "caps::models::cap::m_Cap::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::Effect",
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "effect_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "effect_type",
+          "type": "caps::models::effect::EffectType"
+        },
+        {
+          "name": "target",
+          "type": "caps::models::effect::EffectTarget"
+        },
+        {
+          "name": "remaining_triggers",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "caps::models::effect::EffectTarget",
+      "variants": [
+        {
+          "name": "None",
+          "type": "()"
+        },
+        {
+          "name": "Cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "Square",
+          "type": "caps::models::game::Vec2"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "caps::models::effect::EffectType",
+      "variants": [
+        {
+          "name": "None",
+          "type": "()"
+        },
+        {
+          "name": "DamageBuff",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "Shield",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "Heal",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "DOT",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "MoveBonus",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "AttackBonus",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "BonusRange",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "MoveDiscount",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "AbilityDiscount",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "ExtraEnergy",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "Stun",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "Double",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "AttackDiscount",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::EffectValue",
+      "members": [
+        {
+          "name": "effect_type",
+          "type": "caps::models::effect::EffectType"
+        },
+        {
+          "name": "target",
+          "type": "caps::models::effect::EffectTarget"
+        },
+        {
+          "name": "remaining_triggers",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "caps::models::effect::m_Effect::Event",
       "kind": "enum",
       "variants": []
     },
@@ -261,6 +514,10 @@
         {
           "name": "ClaimCapture",
           "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "Ability",
+          "type": "caps::models::game::Vec2"
         }
       ]
     },
@@ -285,6 +542,10 @@
           "type": "core::integer::u8"
         },
         {
+          "name": "set_id",
+          "type": "core::integer::u64"
+        },
+        {
           "name": "turn_count",
           "type": "core::integer::u64"
         },
@@ -299,6 +560,14 @@
         {
           "name": "caps_ids",
           "type": "core::array::Array::<core::integer::u64>"
+        },
+        {
+          "name": "effect_ids",
+          "type": "core::array::Array::<core::integer::u64>"
+        },
+        {
+          "name": "energy",
+          "type": "core::integer::u8"
         },
         {
           "name": "last_action_timestamp",
@@ -323,6 +592,10 @@
           "type": "core::integer::u8"
         },
         {
+          "name": "set_id",
+          "type": "core::integer::u64"
+        },
+        {
           "name": "turn_count",
           "type": "core::integer::u64"
         },
@@ -337,6 +610,14 @@
         {
           "name": "caps_ids",
           "type": "core::array::Array::<core::integer::u64>"
+        },
+        {
+          "name": "effect_ids",
+          "type": "core::array::Array::<core::integer::u64>"
+        },
+        {
+          "name": "energy",
+          "type": "core::integer::u8"
         },
         {
           "name": "last_action_timestamp",
@@ -359,6 +640,10 @@
         {
           "name": "cap_counter",
           "type": "core::integer::u64"
+        },
+        {
+          "name": "sets_counter",
+          "type": "core::integer::u64"
         }
       ]
     },
@@ -372,6 +657,10 @@
         },
         {
           "name": "cap_counter",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "sets_counter",
           "type": "core::integer::u64"
         }
       ]
@@ -401,6 +690,148 @@
       "name": "caps::models::game::m_Global::Event",
       "kind": "enum",
       "variants": []
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set::Set",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "address",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "max_on_board",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "max_cap_types",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "max_ops_per_ability",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set::SetValue",
+      "members": [
+        {
+          "name": "address",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "max_on_board",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "max_cap_types",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "max_ops_per_ability",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "caps::models::set::m_Set::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::CapType",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "name",
+          "type": "core::byte_array::ByteArray"
+        },
+        {
+          "name": "description",
+          "type": "core::byte_array::ByteArray"
+        },
+        {
+          "name": "max_health",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "attack",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "move_range",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "attack_range",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "play_cost",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "move_cost",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "ability_cost",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "ability_description",
+          "type": "core::byte_array::ByteArray"
+        },
+        {
+          "name": "ability_target",
+          "type": "caps::models::set_data::TargetType"
+        },
+        {
+          "name": "ability_range",
+          "type": "core::array::Array::<caps::models::game::Vec2>"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "caps::models::set_data::TargetType",
+      "variants": [
+        {
+          "name": "None",
+          "type": "()"
+        },
+        {
+          "name": "SelfCap",
+          "type": "()"
+        },
+        {
+          "name": "TeamCap",
+          "type": "()"
+        },
+        {
+          "name": "OpponentCap",
+          "type": "()"
+        },
+        {
+          "name": "AnyCap",
+          "type": "()"
+        },
+        {
+          "name": "AnySquare",
+          "type": "()"
+        }
+      ]
     },
     {
       "type": "interface",
@@ -497,6 +928,26 @@
           "outputs": [
             {
               "type": "core::option::Option::<(caps::models::game::Game, core::array::Span::<caps::models::cap::Cap>)>"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_cap_data",
+          "inputs": [
+            {
+              "name": "game_id",
+              "type": "core::integer::u64"
+            },
+            {
+              "name": "cap_type_id",
+              "type": "core::integer::u16"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::option::Option::<caps::models::set_data::CapType>"
             }
           ],
           "state_mutability": "view"
@@ -664,6 +1115,20 @@
         {
           "name": "Some",
           "type": "(caps::models::game::Game, core::array::Span::<caps::models::cap::Cap>)"
+        },
+        {
+          "name": "None",
+          "type": "()"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "core::option::Option::<caps::models::set_data::CapType>",
+      "variants": [
+        {
+          "name": "Some",
+          "type": "caps::models::set_data::CapType"
         },
         {
           "name": "None",
@@ -2330,7 +2795,7 @@
       "inputs": [
         {
           "name": "model",
-          "type": "caps::models::game::Global"
+          "type": "caps::models::set::Set"
         }
       ],
       "outputs": [],
@@ -2349,7 +2814,7 @@
       "inputs": [
         {
           "name": "value",
-          "type": "caps::models::game::GlobalValue"
+          "type": "caps::models::set::SetValue"
         }
       ],
       "outputs": [],
