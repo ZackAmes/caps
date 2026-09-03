@@ -188,12 +188,16 @@ export async function getHand(
     gameId: num(f[i++]),
     playerSlot: num(f[i++]),
     roster: [],
-    cursor: num(f[i++]),
-    handSize: num(f[i++]),
+    cursor: 0,
+    handSize: 0,
     window: [],
   };
+  // roster: Array<u64>
   const rosterLen = num(f[i++]);
   for (let k = 0; k < rosterLen; k++) hand.roster.push(num(f[i++]));
+  hand.cursor = num(f[i++]);
+  hand.handSize = num(f[i++]);
+  // window: Span<u64>
   const windowLen = num(f[i++]);
   for (let k = 0; k < windowLen; k++) hand.window.push(num(f[i++]));
   return hand;

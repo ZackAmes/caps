@@ -11,6 +11,14 @@ use caps::models::game::Hand;
 
 #[starknet::interface]
 pub trait IActions<T> {
+    /// Register a set contract (governance in production).
+    fn register_set(
+        ref self: T,
+        address: ContractAddress,
+        max_on_board: u8,
+        max_cap_types: u16,
+        max_ops_per_ability: u8,
+    ) -> u64;
     fn create_game(ref self: T, p2: ContractAddress) -> u64;
     fn create_game_with_layout(ref self: T, p2: ContractAddress, layout: u8) -> u64;
     fn create_solo_game(ref self: T) -> u64;
@@ -314,6 +322,29 @@ pub mod actions {
                 i += 1;
             };
             Option::Some((game, caps.span()))
+        }
+
+        fn register_set(
+            ref self: ContractState,
+            address: ContractAddress,
+            max_on_board: u8,
+            max_cap_types: u16,
+            max_ops_per_ability: u8,
+        ) -> u64 {
+            let mut world = self.world_default();
+            let mut global: Global = world.read_model(0);
+            let set_id = global.sets_counter;
+            global.sets_counter = set_id + 1;
+            world.write_model(@global);
+            let set = Set {
+                id: set_id,
+                address,
+                max_on_board,
+                max_cap_types,
+                max_ops_per_ability,
+            };
+            world.write_model(@set);
+            set_id
         }
 
         fn get_cap_data(

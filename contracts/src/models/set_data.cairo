@@ -71,7 +71,7 @@ pub struct AbilityContext {
 }
 
 /// The acting piece, flattened for set consumption.
-#[derive(Drop, Serde, Debug, Clone)]
+#[derive(Copy, Drop, Serde, Debug)]
 pub struct ActorInfo {
     pub id: u64,
     pub owner: felt252,
@@ -82,7 +82,7 @@ pub struct ActorInfo {
 }
 
 /// Cap snapshot for set consumption (no Dojo model, no storage semantics).
-#[derive(Drop, Serde, Debug, Clone)]
+#[derive(Copy, Drop, Serde, Debug)]
 pub struct CapInfo {
     pub id: u64,
     pub owner: felt252,
@@ -94,7 +94,7 @@ pub struct CapInfo {
 }
 
 /// Effect snapshot for set consumption.
-#[derive(Drop, Serde, Debug, Clone)]
+#[derive(Copy, Drop, Serde, Debug)]
 pub struct EffectSnapshot {
     pub effect_type: EffectType,
     pub target_cap_id: u64,
@@ -116,6 +116,7 @@ pub enum SetOp {
     Push: SetOpPush,
     Teleport: SetOpTeleport,
     Swap: SetOpSwap,
+    ApplyEffect: SetOpApplyEffect,
     Cleanse: SetOpCleanse,
     CleansePositive: SetOpCleansePositive,
     Summon: SetOpSummon,
@@ -143,6 +144,12 @@ pub struct SetOpShield {
 #[derive(Copy, Drop, Serde, Debug)]
 pub struct SetOpSacrifice {
     pub target_cap: u64,
+}
+#[derive(Copy, Drop, Serde, Debug)]
+pub struct SetOpApplyEffect {
+    pub target_cap: u64,
+    pub effect: EffectType,
+    pub triggers: u8,
 }
 #[derive(Copy, Drop, Serde, Debug)]
 pub struct SetOpPush {

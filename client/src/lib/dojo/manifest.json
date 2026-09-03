@@ -34,16 +34,27 @@
   "contracts": [
     {
       "address": "0x595529996c02ab0520ceeba845944bc8be502ddb1678ffd313856a54a886baf",
-      "class_hash": "0x1e738f4825564c986046f7e40f7c36c0c417b116681ac5dcf0172ee9097620d",
+      "class_hash": "0x57a9fd78a040165f39c48d449cdbb69c28ed2d6cf6d72b084fb1c810f611ff",
       "init_calldata": [],
       "tag": "caps-actions",
       "selector": "0x482dc9f44e8c68f3ef3ab58497e0d8e446ad2581a5544512fbaebef3af3ccbc",
       "systems": [
+        "register_set",
         "create_game",
         "create_game_with_layout",
         "create_solo_game",
         "create_solo_game_with_layout",
         "take_turn",
+        "upgrade"
+      ]
+    },
+    {
+      "address": "0x48bbea6f1a5490fbeea1fafe9d6326accf29eb9c3acc4ff17d42bcefb07ac7",
+      "class_hash": "0x61cf597b43aca78d80dd0480a03ae892d010b329f8a48f00540a2204f4d72cb",
+      "init_calldata": [],
+      "tag": "caps-set_zero",
+      "selector": "0x35ce53c0ff5c6ffb239bb347c5287062ae627c62c39204363d9153ba72a9377",
+      "systems": [
         "upgrade"
       ]
     }
@@ -774,6 +785,48 @@
       "variants": []
     },
     {
+      "type": "interface",
+      "name": "caps::models::set::ISetInterface",
+      "items": [
+        {
+          "type": "function",
+          "name": "get_cap_type",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "core::integer::u16"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::option::Option::<caps::models::set_data::CapType>"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "activate_ability",
+          "inputs": [
+            {
+              "name": "ctx",
+              "type": "caps::models::set_data::AbilityContext"
+            },
+            {
+              "name": "target",
+              "type": "caps::models::game::Vec2"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "caps::models::set_data::SetOutput"
+            }
+          ],
+          "state_mutability": "view"
+        }
+      ]
+    },
+    {
       "type": "struct",
       "name": "caps::models::set::Set",
       "members": [
@@ -826,6 +879,100 @@
       "name": "caps::models::set::m_Set::Event",
       "kind": "enum",
       "variants": []
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::AbilityContext",
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "layout",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "turn_count",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "energy",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "actor",
+          "type": "caps::models::set_data::ActorInfo"
+        },
+        {
+          "name": "caps",
+          "type": "core::array::Span::<caps::models::set_data::CapInfo>"
+        },
+        {
+          "name": "effects",
+          "type": "core::array::Span::<caps::models::set_data::EffectSnapshot>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::ActorInfo",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "owner",
+          "type": "core::felt252"
+        },
+        {
+          "name": "cap_type",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "x",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "y",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "health",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::CapInfo",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "owner",
+          "type": "core::felt252"
+        },
+        {
+          "name": "cap_type",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "x",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "y",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "health",
+          "type": "core::integer::u16"
+        }
+      ]
     },
     {
       "type": "struct",
@@ -886,6 +1033,346 @@
       ]
     },
     {
+      "type": "struct",
+      "name": "caps::models::set_data::EffectSnapshot",
+      "members": [
+        {
+          "name": "effect_type",
+          "type": "caps::models::effect::EffectType"
+        },
+        {
+          "name": "target_cap_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "remaining_triggers",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "caps::models::set_data::SetEvent",
+      "variants": [
+        {
+          "name": "Flavor",
+          "type": "caps::models::set_data::SetEventFlavor"
+        },
+        {
+          "name": "DamageDealt",
+          "type": "caps::models::set_data::SetEventDamageDealt"
+        },
+        {
+          "name": "EffectGained",
+          "type": "caps::models::set_data::SetEventEffectGained"
+        },
+        {
+          "name": "PieceMoved",
+          "type": "caps::models::set_data::SetEventPieceMoved"
+        },
+        {
+          "name": "Summoned",
+          "type": "caps::models::set_data::SetEventSummoned"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetEventDamageDealt",
+      "members": [
+        {
+          "name": "source",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "target",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetEventEffectGained",
+      "members": [
+        {
+          "name": "cap_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "effect",
+          "type": "caps::models::effect::EffectType"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetEventFlavor",
+      "members": [
+        {
+          "name": "code",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetEventPieceMoved",
+      "members": [
+        {
+          "name": "cap_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "from",
+          "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "to",
+          "type": "caps::models::game::Vec2"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetEventSummoned",
+      "members": [
+        {
+          "name": "cap_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "cap_type",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "at",
+          "type": "caps::models::game::Vec2"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "caps::models::set_data::SetOp",
+      "variants": [
+        {
+          "name": "Damage",
+          "type": "caps::models::set_data::SetOpDamage"
+        },
+        {
+          "name": "Heal",
+          "type": "caps::models::set_data::SetOpHeal"
+        },
+        {
+          "name": "Shield",
+          "type": "caps::models::set_data::SetOpShield"
+        },
+        {
+          "name": "Sacrifice",
+          "type": "caps::models::set_data::SetOpSacrifice"
+        },
+        {
+          "name": "Push",
+          "type": "caps::models::set_data::SetOpPush"
+        },
+        {
+          "name": "Teleport",
+          "type": "caps::models::set_data::SetOpTeleport"
+        },
+        {
+          "name": "Swap",
+          "type": "caps::models::set_data::SetOpSwap"
+        },
+        {
+          "name": "ApplyEffect",
+          "type": "caps::models::set_data::SetOpApplyEffect"
+        },
+        {
+          "name": "Cleanse",
+          "type": "caps::models::set_data::SetOpCleanse"
+        },
+        {
+          "name": "CleansePositive",
+          "type": "caps::models::set_data::SetOpCleansePositive"
+        },
+        {
+          "name": "Summon",
+          "type": "caps::models::set_data::SetOpSummon"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpApplyEffect",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "effect",
+          "type": "caps::models::effect::EffectType"
+        },
+        {
+          "name": "triggers",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpCleanse",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpCleansePositive",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpDamage",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpHeal",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "max_health",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpPush",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "direction",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "steps",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpSacrifice",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpShield",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpSummon",
+      "members": [
+        {
+          "name": "cap_type_id",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "at",
+          "type": "caps::models::game::Vec2"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpSwap",
+      "members": [
+        {
+          "name": "cap_a",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "cap_b",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOpTeleport",
+      "members": [
+        {
+          "name": "target_cap",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "to",
+          "type": "caps::models::game::Vec2"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::set_data::SetOutput",
+      "members": [
+        {
+          "name": "ops",
+          "type": "core::array::Span::<caps::models::set_data::SetOp>"
+        },
+        {
+          "name": "events",
+          "type": "core::array::Span::<caps::models::set_data::SetEvent>"
+        }
+      ]
+    },
+    {
       "type": "enum",
       "name": "caps::models::set_data::TargetType",
       "variants": [
@@ -916,9 +1403,54 @@
       ]
     },
     {
+      "type": "event",
+      "name": "caps::sets::set_zero::set_zero::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "UpgradeableEvent",
+          "type": "dojo::contract::components::upgradeable::upgradeable_cpt::Event",
+          "kind": "nested"
+        },
+        {
+          "name": "WorldProviderEvent",
+          "type": "dojo::contract::components::world_provider::world_provider_cpt::Event",
+          "kind": "nested"
+        }
+      ]
+    },
+    {
       "type": "interface",
       "name": "caps::systems::actions::IActions",
       "items": [
+        {
+          "type": "function",
+          "name": "register_set",
+          "inputs": [
+            {
+              "name": "address",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "max_on_board",
+              "type": "core::integer::u8"
+            },
+            {
+              "name": "max_cap_types",
+              "type": "core::integer::u16"
+            },
+            {
+              "name": "max_ops_per_ability",
+              "type": "core::integer::u8"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "external"
+        },
         {
           "type": "function",
           "name": "create_game",
@@ -1095,6 +1627,46 @@
         {
           "name": "snapshot",
           "type": "@core::array::Array::<caps::models::cap::Cap>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "core::array::Span::<caps::models::set_data::CapInfo>",
+      "members": [
+        {
+          "name": "snapshot",
+          "type": "@core::array::Array::<caps::models::set_data::CapInfo>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "core::array::Span::<caps::models::set_data::EffectSnapshot>",
+      "members": [
+        {
+          "name": "snapshot",
+          "type": "@core::array::Array::<caps::models::set_data::EffectSnapshot>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "core::array::Span::<caps::models::set_data::SetEvent>",
+      "members": [
+        {
+          "name": "snapshot",
+          "type": "@core::array::Array::<caps::models::set_data::SetEvent>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "core::array::Span::<caps::models::set_data::SetOp>",
+      "members": [
+        {
+          "name": "snapshot",
+          "type": "@core::array::Array::<caps::models::set_data::SetOp>"
         }
       ]
     },

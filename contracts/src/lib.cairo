@@ -10,6 +10,10 @@ pub mod models {
     pub mod set_data;
 }
 
+pub mod sets {
+    pub mod set_zero;
+}
+
 pub mod logic {
     pub mod hand;
     pub mod ops;
