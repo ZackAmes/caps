@@ -134,11 +134,12 @@ export interface ChainCap {
   id: number;
   owner: string;
   capType: number;
+  setId: number;
   x: number | null;
   y: number | null;
   health: number;
-  maxHealth: number;
-  attack: number;
+  shield: number;
+  stunnedTurns: number;
 }
 
 export interface ChainGame {
@@ -146,11 +147,108 @@ export interface ChainGame {
   player1: string;
   player2: string;
   layout: number;
+  setId: number;
   turnCount: number;
   over: boolean;
   winner: string;
-  lastFrame: number;
+  energy: number;
+  effectIds: number[];
   caps: ChainCap[];
+}
+
+/** Piece definition fetched from the game's set contract. */
+export interface CapTypeDef {
+  id: number;
+  name: string;
+  description: string;
+  maxHealth: number;
+  attack: number;
+  moveRange: number;
+  attackRange: number;
+  playCost: number;
+  moveCost: number;
+  abilityCost: number;
+  abilityDescription: string;
+  abilityTarget: number; // TargetType enum index
+  abilityRange: Array<[number, number]>;
+}
+
+/** Fetch a piece definition from the game's set contract. */
+export async function getCapType(
+  gameId: number,
+  capTypeId: number
+): Promise<CapTypeDef | null> {
+  const raw = await provider.callContract({
+    contractAddress: ACTIONS,
+    entrypoint: "get_cap_data",
+    calldata: CallData.compile([gameId, capTypeId]),
+  });
+  const f: string[] = raw as unknown as string[];
+  if (!f || f.length === 0) return null;
+
+  let i = 0;
+  const option = num(f[i++]);
+  if (option !== 0) return null;
+
+  const id = num(f[i++]);
+  // ByteArray: [len, chunk0..chunkN, pending_len, pending_data]
+  const baLen = num(f[i++]);
+  let name = "";
+  for (let k = 0; k < baLen; k++) {
+    name += BigInt(f[i++]).toString(16).padStart(64, "0")
+      .replace(/00/g, "");
+  }
+  i++; // pending words len
+  i++; // pending data
+  const description = name; // second ByteArray parsed same way below
+  const baLen2 = num(f[i++]);
+  let desc = "";
+  for (let k = 0; k < baLen2; k++) {
+    desc += BigInt(f[i++]).toString(16).padStart(64, "0").replace(/00/g, "");
+  }
+  i++; // pending words len
+  i++; // pending data
+
+  const maxHealth = num(f[i++]);
+  const attack = num(f[i++]);
+  const moveRange = num(f[i++]);
+  const attackRange = num(f[i++]);
+  const playCost = num(f[i++]);
+  const moveCost = num(f[i++]);
+  const abilityCost = num(f[i++]);
+  // third ByteArray: ability_description
+  const baLen3 = num(f[i++]);
+  let abilityDescription = "";
+  for (let k = 0; k < baLen3; k++) {
+    abilityDescription += BigInt(f[i++]).toString(16).padStart(64, "0")
+      .replace(/00/g, "");
+  }
+  i++;
+  i++;
+  const abilityTarget = num(f[i++]);
+  const rangeLen = num(f[i++]);
+  const abilityRange: Array<[number, number]> = [];
+  for (let k = 0; k < rangeLen; k++) {
+    const rx = num(f[i++]);
+    const ry = num(f[i++]);
+    abilityRange.push([rx, ry]);
+  }
+
+  return {
+    id,
+    name,
+    description: desc,
+    maxHealth,
+    attack,
+    moveRange,
+    attackRange,
+    playCost,
+    moveCost,
+    abilityCost,
+    abilityDescription,
+    abilityTarget,
+    abilityRange,
+  };
 }
 
 export function isDevMode(): boolean {
@@ -356,23 +454,33 @@ export async function getGame(gameId: number): Promise<ChainGame | null> {
     player1: f[i++],
     player2: f[i++],
     layout: num(f[i++]),
+    setId: num(f[i++]),
     turnCount: num(f[i++]),
     over: num(f[i++]) === 1,
     winner: f[i++],
-    lastFrame: 0,
+    energy: 0,
+    effectIds: [],
     caps: [],
   };
 
+  // caps_ids: Array<u64>
   const idCount = num(f[i++]);
   for (let k = 0; k < idCount; k++) i++;
-
-  game.lastFrame = num(f[i++]);
+  // effect_ids: Array<u64>
+  const effectCount = num(f[i++]);
+  for (let k = 0; k < effectCount; k++) {
+    game.effectIds.push(num(f[i++]));
+  }
+  // energy: u8, last_action_timestamp: u64
+  game.energy = num(f[i++]);
+  i++; // timestamp
 
   const capCount = num(f[i++]);
   for (let k = 0; k < capCount; k++) {
     const id = num(f[i++]);
     const owner = f[i++];
     const capType = num(f[i++]);
+    const setId = num(f[i++]);
     const locVariant = num(f[i++]);
     let x: number | null = null;
     let y: number | null = null;
@@ -381,8 +489,11 @@ export async function getGame(gameId: number): Promise<ChainGame | null> {
       y = num(f[i++]);
     }
     const health = num(f[i++]);
-    const stats = CAP_STATS[capType] ?? CAP_STATS[1];
-    game.caps.push({ id, owner, capType, x, y, health, maxHealth: stats[0], attack: stats[1] });
+    const shield = num(f[i++]);
+    const stunnedTurns = num(f[i++]);
+    game.caps.push({
+      id, owner, capType, setId, x, y, health, shield, stunnedTurns,
+    });
   }
 
   return game;

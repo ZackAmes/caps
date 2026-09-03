@@ -639,10 +639,10 @@
             <div class="meta">
                 <button class="back" onclick={() => { game = null; queuedActions = []; selectedCapId = null; }}>← Lobby</button>
                 <span class="badge">#{game.id}</span>
-                <span class="badge">{activeLayout.name}</span>
                 <span class="turn-badge {game.turnCount % 2 === 0 ? 'p1' : 'p2'}">
-                    {game.turnCount % 2 === 0 ? "P1's turn" : "P2's turn"}
+                    {game.turnCount % 2 === 0 ? "P1" : "P2"}
                 </span>
+                <span class="energy-badge" title="Energy this turn">⚡ {game.energy}</span>
             </div>
 
             {#if game.over}
@@ -729,6 +729,8 @@
                                 <div class="piece-body">
                                     <div class="type">{c.capType === 0 ? '★' : c.capType}</div>
                                     <div class="hp">{c.health}</div>
+                                    {#if c.shield > 0}<div class="shield-badge">🛡{c.shield}</div>{/if}
+                                    {#if c.stunnedTurns > 0}<div class="stun-badge">💫</div>{/if}
                                 </div>
                                 {#if isCaptureTarget(c.x, c.y)}
                                     <div class="cap-mark">⛓</div>
@@ -1074,6 +1076,30 @@
         border-radius: 3px;
         color: #fff;
         margin-top: 1px;
+    }
+    .energy-badge {
+        background: #3b3305;
+        border: 1px solid #eab308;
+        color: #fde047;
+        padding: 0.2rem 0.55rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+    .shield-badge {
+        font-size: clamp(0.45rem, 2vw, 0.6rem);
+        background: rgba(59, 130, 246, 0.85);
+        padding: 0 0.2rem;
+        border-radius: 3px;
+        color: #fff;
+        margin-top: 1px;
+    }
+    .stun-badge {
+        position: absolute;
+        top: -6px;
+        left: -6px;
+        font-size: 0.8rem;
+        filter: drop-shadow(0 0 3px #eab308);
     }
     .cap-mark {
         position: absolute;
