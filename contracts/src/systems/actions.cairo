@@ -7,6 +7,7 @@ use caps::logic::track::{
 use starknet::ContractAddress;
 
 use caps::models::set_data::CapType;
+use caps::models::game::Hand;
 
 #[starknet::interface]
 pub trait IActions<T> {
@@ -18,6 +19,8 @@ pub trait IActions<T> {
     fn get_game(self: @T, game_id: u64) -> Option<(Game, Span<Cap>)>;
     /// Fetch a piece definition from the game's set contract.
     fn get_cap_data(self: @T, game_id: u64, cap_type_id: u16) -> Option<CapType>;
+    /// Fetch a player's hand (public — both hands visible).
+    fn get_hand(self: @T, game_id: u64, player_slot: u8) -> Option<(Hand, Span<u64>)>;
 }
 
 /// Position helpers (no world access needed).
@@ -99,6 +102,8 @@ pub mod actions {
     use caps::models::game::{Game, Global, Action, ActionType};
     use caps::models::cap::{Cap, Location, get_position};
     use caps::models::set::{Set, ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait};
+    use caps::models::game::Hand;
+    use caps::logic::hand::{is_in_hand, advance_cursor, HAND_SIZE};
     use caps::models::set_data::{CapType, ActorInfo, CapInfo};
     use dojo::model::ModelStorage;
 
@@ -170,6 +175,12 @@ pub mod actions {
                         assert!(cap.location == Location::Bench, "Not on bench");
                         assert!(!has_cap_at(@caps, pos), "Tile is occupied");
 
+                        // Hand check: the piece must be in the player's
+                        // current hand window.
+                        let player_slot: u8 = if cap.owner == game.player1 { 0 } else { 1 };
+                        let hand: Hand = world.read_model((game_id, player_slot));
+                        assert!(is_in_hand(@hand, cap.id), "Piece is not in your hand");
+
                         let deploy_pos = if cap.owner == game.player1 {
                             get_p1_deploy_spot(layout)
                         } else {
@@ -179,6 +190,11 @@ pub mod actions {
                             "Must play at your deploy spot");
                         cap.location = Location::Board(pos);
                         world.write_model(@cap);
+
+                        // Advance the hand cursor — the cycle continues.
+                        let mut hand_updated = hand;
+                        advance_cursor(ref hand_updated);
+                        world.write_model(@hand_updated);
                     },
                     ActionType::Move(pos) => {
                         assert!(is_walkable(layout, pos), "Tile is not on layout");
@@ -309,6 +325,19 @@ pub mod actions {
             let dispatcher = ISetInterfaceDispatcher { contract_address: set.address };
             dispatcher.get_cap_type(cap_type_id)
         }
+
+        fn get_hand(
+            self: @ContractState, game_id: u64, player_slot: u8,
+        ) -> Option<(Hand, Span<u64>)> {
+            let world = self.world_default();
+            let hand: Hand = world.read_model((game_id, player_slot));
+            if hand.roster.len() == 0 {
+                return Option::None;
+            }
+            // window ids as span for the client
+            let window = caps::logic::hand::window_ids(@hand);
+            Option::Some((hand, window.span()))
+        }
     }
 
     #[generate_trait]
@@ -382,6 +411,37 @@ pub mod actions {
             };
 
             global.cap_counter = cap_counter;
+
+            // ── Hands: even-indexed caps are P1's roster, odd are P2's.
+            // Roster order = creation order; the cycle is deterministic.
+            let mut p1_roster = ArrayTrait::new();
+            let mut p2_roster = ArrayTrait::new();
+            let mut hi: usize = 0;
+            while hi < game.caps_ids.len() {
+                if hi % 2 == 0 {
+                    p1_roster.append(*game.caps_ids.at(hi));
+                } else {
+                    p2_roster.append(*game.caps_ids.at(hi));
+                }
+                hi += 1;
+            };
+            let hand1 = Hand {
+                game_id,
+                player_slot: 0,
+                roster: p1_roster,
+                cursor: 0,
+                hand_size: HAND_SIZE,
+            };
+            let hand2 = Hand {
+                game_id,
+                player_slot: 1,
+                roster: p2_roster,
+                cursor: 0,
+                hand_size: HAND_SIZE,
+            };
+            world.write_model(@hand1);
+            world.write_model(@hand2);
+
             world.write_model(@game);
             world.write_model(@global);
 

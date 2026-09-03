@@ -11,6 +11,7 @@ pub mod models {
 }
 
 pub mod logic {
+    pub mod hand;
     pub mod ops;
     pub mod track;
 }

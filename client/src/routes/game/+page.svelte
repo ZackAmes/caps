@@ -3,7 +3,8 @@
     import {
         connect, getAccount, createGame, createSoloGame, takeTurn, getGame,
         getLayout, isValidStep, isSurroundedIn, LAYOUTS, LAYOUT_PERIMETER_5X5, isDevMode,
-        type ChainGame, type ChainCap, type TurnAction, type LayoutConfig, CAP_STATS,
+        getHand,
+        type ChainGame, type ChainCap, type TurnAction, type LayoutConfig, type ChainHand, CAP_STATS,
     } from '$lib/dojo/client';
 
     let account = $state<string | null>(null);
@@ -47,6 +48,7 @@
     let gameIdInput = $state('1');
     let game = $state<ChainGame | null>(null);
 
+    let hand = $state<ChainHand | null>(null);
     let selectedCapId = $state<number | null>(null);
     let queuedActions: TurnAction[] = $state([]);
     let committing = $state(false);
@@ -149,7 +151,21 @@
     function myBenchCaps(): ChainCap[] {
         const owner = myOwner();
         if (!owner) return [];
-        return benchCaps().filter(c => c.owner === owner);
+        let candidates = benchCaps().filter(c => c.owner === owner);
+        // Hand filter: only pieces in the current hand window are playable
+        if (hand) {
+            const windowSet = new Set(hand.window);
+            candidates = candidates.filter(c => windowSet.has(c.id));
+        }
+        return candidates;
+    }
+
+    /** Bench pieces waiting for the hand cycle to come around. */
+    function lockedBenchCount(): number {
+        const owner = myOwner();
+        if (!owner) return 0;
+        const all = benchCaps().filter(c => c.owner === owner);
+        return all.length - myBenchCaps().length;
     }
 
     function myBoardCaps(): ChainCap[] {
@@ -509,6 +525,9 @@
             if (Number.isNaN(id) || id <= 0) throw new Error('Enter a valid game id');
             game = await getGame(id);
             if (!game) throw new Error(`Game ${id} not found`);
+            // Load the current turn player's hand (public info)
+            const slot = game.turnCount % 2;
+            hand = await getHand(id, slot);
             selectedCapId = null;
             queuedActions = [];
             status = `Loaded game #${id}`;
@@ -637,7 +656,7 @@
         <!-- Game View -->
         <section class="gameview">
             <div class="meta">
-                <button class="back" onclick={() => { game = null; queuedActions = []; selectedCapId = null; }}>← Lobby</button>
+                <button class="back" onclick={() => { game = null; queuedActions = []; selectedCapId = null; hand = null; }}>← Lobby</button>
                 <span class="badge">#{game.id}</span>
                 <span class="turn-badge {game.turnCount % 2 === 0 ? 'p1' : 'p2'}">
                     {game.turnCount % 2 === 0 ? "P1" : "P2"}
@@ -776,6 +795,11 @@
             {/if}
 
             <!-- Bench -->
+            {#if lockedBenchCount() > 0}
+                <div class="locked-note">
+                    🔒 {lockedBenchCount()} piece{lockedBenchCount() === 1 ? '' : 's'} cycling back into your hand…
+                </div>
+            {/if}
             {#if myBenchCaps().length > 0}
                 <div class="bench">
                     <span class="bench-label">Bench ({game.turnCount % 2 === 0 ? 'P1' : 'P2'})</span>
@@ -1076,6 +1100,11 @@
         border-radius: 3px;
         color: #fff;
         margin-top: 1px;
+    }
+    .locked-note {
+        color: #64748b;
+        font-size: 0.78rem;
+        padding: 0.25rem 0;
     }
     .energy-badge {
         background: #3b3305;

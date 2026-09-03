@@ -156,6 +156,49 @@ export interface ChainGame {
   caps: ChainCap[];
 }
 
+/** A player's hand: deterministic cycle through their roster. */
+export interface ChainHand {
+  gameId: number;
+  playerSlot: number;
+  roster: number[];
+  cursor: number;
+  handSize: number;
+  /** Cap ids currently visible in the window (server-computed). */
+  window: number[];
+}
+
+/** Fetch a player's hand (public — both hands visible). */
+export async function getHand(
+  gameId: number,
+  playerSlot: number
+): Promise<ChainHand | null> {
+  const raw = await provider.callContract({
+    contractAddress: ACTIONS,
+    entrypoint: "get_hand",
+    calldata: CallData.compile([gameId, playerSlot]),
+  });
+  const f: string[] = raw as unknown as string[];
+  if (!f || f.length === 0) return null;
+
+  let i = 0;
+  const option = num(f[i++]);
+  if (option !== 0) return null;
+
+  const hand: ChainHand = {
+    gameId: num(f[i++]),
+    playerSlot: num(f[i++]),
+    roster: [],
+    cursor: num(f[i++]),
+    handSize: num(f[i++]),
+    window: [],
+  };
+  const rosterLen = num(f[i++]);
+  for (let k = 0; k < rosterLen; k++) hand.roster.push(num(f[i++]));
+  const windowLen = num(f[i++]);
+  for (let k = 0; k < windowLen; k++) hand.window.push(num(f[i++]));
+  return hand;
+}
+
 /** Piece definition fetched from the game's set contract. */
 export interface CapTypeDef {
   id: number;

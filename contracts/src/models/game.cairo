@@ -8,6 +8,26 @@ pub struct Global {
     pub sets_counter: u64,
 }
 
+/// Hand model: a player's available pieces this game. Public and
+/// deterministic — no randomness. The hand is a fixed-size cycle through
+/// the player's roster: play the piece at `cursor`, cursor advances.
+/// Bench pieces NOT in the current hand window cannot be deployed.
+#[derive(Drop, Serde, Debug, Clone)]
+#[dojo::model]
+pub struct Hand {
+    #[key]
+    pub game_id: u64,
+    /// 0 = player1's hand, 1 = player2's hand.
+    #[key]
+    pub player_slot: u8,
+    /// Roster cap ids in fixed order (the cycle).
+    pub roster: Array<u64>,
+    /// Index into roster — the next piece(s) available to deploy.
+    pub cursor: u8,
+    /// How many pieces are "in hand" at once (the visible window).
+    pub hand_size: u8,
+}
+
 #[derive(Drop, Serde, Debug, Clone)]
 #[dojo::model]
 pub struct Game {
@@ -38,6 +58,7 @@ pub struct Action {
 #[derive(Drop, Serde, Copy, Introspect)]
 pub enum ActionType {
     /// Deploy a bench cap at a position (must be the player's deploy spot).
+    /// The cap must be in the player's current hand window.
     Play: Vec2,
     /// Move 1 step. Moving onto an enemy tile attacks it: if it dies the
     /// mover takes the tile, otherwise the mover stays put.
