@@ -108,3 +108,58 @@ pub impl EffectImpl of EffectTrait {
         }
     }
 }
+
+// ── Passives ──
+// Passive abilities are always-on piece traits declared by the set
+// contract in CapType. The core evaluates them at defined trigger
+// points — sets cannot run arbitrary code.
+
+/// A passive ability declared on a CapType.
+#[derive(Copy, Drop, Serde, Debug, Introspect)]
+pub struct Passive {
+    pub passive_type: PassiveType,
+}
+
+/// Cairo enums only support tuple payloads — each passive type gets its
+/// own single-field struct (same pattern as SetOp).
+#[derive(Copy, Drop, Serde, PartialEq, Default, Debug, Introspect)]
+pub enum PassiveType {
+    #[default]
+    None,
+    Aura: SetPassiveAura,
+    DamageReduction: SetPassiveDamageReduction,
+    ConditionalAttack: SetPassiveConditionalAttack,
+    Regeneration: SetPassiveRegeneration,
+    FreeFirstAttack,
+}
+
+#[derive(Copy, Drop, Serde, PartialEq, Debug, Introspect)]
+pub struct SetPassiveAura {
+    pub effect: EffectType,
+    pub radius: u8,
+}
+#[derive(Copy, Drop, Serde, PartialEq, Debug, Introspect)]
+pub struct SetPassiveDamageReduction {
+    pub amount: u16,
+}
+#[derive(Copy, Drop, Serde, PartialEq, Debug, Introspect)]
+pub struct SetPassiveConditionalAttack {
+    pub amount: u16,
+    pub condition: Condition,
+}
+#[derive(Copy, Drop, Serde, PartialEq, Debug, Introspect)]
+pub struct SetPassiveRegeneration {
+    pub amount: u16,
+}
+
+/// Conditions the core can evaluate. Tuple payloads (Cairo enum style).
+#[derive(Copy, Drop, Serde, PartialEq, Default, Debug, Introspect)]
+pub enum Condition {
+    #[default]
+    None,
+    MinAlliesOnBoard: u8,
+    HasAdjacentAlly,
+    EnemyInRange: u8,
+    HealthBelow: u8,
+    OnEnemyHalf,
+}

@@ -203,6 +203,25 @@ export async function getHand(
   return hand;
 }
 
+/** An active effect on the board. */
+export interface ChainEffect {
+  gameId: number;
+  effectId: number;
+  effectType: number; // EffectType enum index
+  effectValue: number; // payload (damage/heal/etc)
+  targetCapId: number;
+  remainingTriggers: number;
+}
+
+/** Fetch all live effects for a game. Uses get_game's effect_ids + reads
+ *  each effect model. For v1 we parse them from the game's effect_ids
+ *  array via individual reads. */
+export async function getEffects(gameId: number, effectIds: number[]): Promise<ChainEffect[]> {
+  // v1: effects aren't exposed via a view — skip for now, the UI will
+  // render them once a batched view lands.
+  return [];
+}
+
 /** Piece definition fetched from the game's set contract. */
 export interface CapTypeDef {
   id: number;

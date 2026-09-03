@@ -133,7 +133,8 @@ pub mod actions {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use caps::models::game::{Game, Global, Action, ActionType};
     use caps::models::cap::{Cap, Location, get_position};
-    use caps::models::effect::{Effect, EffectTarget};
+    use caps::models::effect::{Effect, EffectTarget, Timing};
+    use caps::models::set_data::EffectTickerTrait;
     use caps::models::set::{Set, ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait};
     use caps::models::set_data::{CapType, TargetType, AbilityContext, ActorInfo, CapInfo, EffectSnapshot};
     use caps::logic::ops::apply_op;
@@ -197,6 +198,13 @@ pub mod actions {
             // ── Energy economy (docs/GAME_DESIGN.md §3.4) ──
             let mut effects = self._load_effects(game_id, @game);
 
+            // ── Start of turn: tick StartOfTurn effects ──
+            // Applies ExtraEnergy + resolves Stuns, decrements triggers.
+            let start_tick = EffectTickerTrait::tick_effects(
+                @effects, Timing::StartOfTurn, game.turn_count,
+            );
+            effects = start_tick.effects;
+
             let mut energy: u8 = match game.turn_count {
                 0 => 0,
                 1 => 2,
@@ -205,17 +213,31 @@ pub mod actions {
                 4 => 5,
                 _ => 7,
             };
+            energy += start_tick.extra_energy;
             game.energy = energy;
+
+            let mut caps = alive_caps(@world, @game);
 
             let mut i: usize = 0;
             while i < turn.len() {
                 let action: Action = *turn.at(i);
-                let mut caps = alive_caps(@world, @game);
                 let act_idx = index_of_id(@caps, action.cap_id);
                 assert!(act_idx < caps.len(), "Cap not found");
                 let mut cap: Cap = *caps.at(act_idx);
                 assert!(cap.owner == caller, "Not your cap");
                 assert!(cap.location != Location::Dead, "Cap is dead");
+
+                // Stun check: skip action if this cap is stunned
+                let mut si: usize = 0;
+                let mut is_stunned = false;
+                while si < start_tick.stunned.len() {
+                    if *start_tick.stunned.at(si) == cap.id {
+                        is_stunned = true;
+                        break;
+                    }
+                    si += 1;
+                };
+                assert!(!is_stunned, "Cap is stunned");
 
                 match action.action_type {
                     ActionType::Play(pos) => {
@@ -473,6 +495,64 @@ pub mod actions {
             }
 
             game.energy = energy;
+
+            // ── End of turn: tick EndOfTurn effects (DOT, Heal) ──
+            let end_tick = EffectTickerTrait::tick_effects(
+                @effects, Timing::EndOfTurn, game.turn_count,
+            );
+
+            // Apply DOT damage (needs cap stats for death handling)
+            let mut di: usize = 0;
+            while di < end_tick.dot_damage.len() {
+                let hit = *end_tick.dot_damage.at(di);
+                let cap_idx = index_of_id(@caps, hit.cap_id);
+                if cap_idx < caps.len() {
+                    let mut target: Cap = *caps.at(cap_idx);
+                    if target.location != Location::Dead {
+                        if target.shield >= hit.amount {
+                            target.shield -= hit.amount;
+                        } else {
+                            let through = hit.amount - target.shield;
+                            target.shield = 0;
+                            if target.health > through {
+                                target.health -= through;
+                            } else {
+                                target.health = 0;
+                                target.location = Location::Dead;
+                            }
+                        }
+                        world.write_model(@target);
+                    }
+                }
+                di += 1;
+            };
+
+            // Apply Heal effects
+            let mut hi: usize = 0;
+            while hi < end_tick.heal_amounts.len() {
+                let hit = *end_tick.heal_amounts.at(hi);
+                let cap_idx = index_of_id(@caps, hit.cap_id.into());
+                if cap_idx < caps.len() {
+                    let mut target: Cap = *caps.at(cap_idx);
+                    if target.location != Location::Dead {
+                        // Heal clamps at cap type max (fetch from set)
+                        let max_hp: u16 = self._stats_max_health(game.set_id, target.cap_type);
+                        if target.health < max_hp {
+                            if target.health + hit.amount > max_hp {
+                                target.health = max_hp;
+                            } else {
+                                target.health += hit.amount;
+                            }
+                        }
+                        world.write_model(@target);
+                    }
+                }
+                hi += 1;
+            };
+
+            // Persist surviving effects
+            self._write_effects(@game, end_tick.effects);
+
             game.last_action_timestamp = get_block_timestamp();
             game.turn_count += 1;
             world.write_model(@game);
@@ -677,6 +757,20 @@ pub mod actions {
                 i += 1;
             };
             effects
+        }
+
+        fn _write_effects(ref self: ContractState, game: @Game, effects: Array<Effect>) {
+            let mut world = self.world_default();
+            let mut i: usize = 0;
+            while i < effects.len() {
+                let e = *effects.at(i);
+                if e.remaining_triggers > 0 {
+                    world.write_model(@e);
+                } else {
+                    world.erase_model(@e);
+                }
+                i += 1;
+            };
         }
 
         fn _stats_attack(ref self: ContractState, set_id: u64, cap_type: u16) -> u16 {

@@ -3,7 +3,7 @@ use caps::models::set_data::{
     AbilityContext, CapType, SetOp, SetOutput, TargetType, SetEvent,
     SetOpDamage, SetOpHeal, SetOpShield, SetOpApplyEffect, CapInfo,
 };
-use caps::models::effect::EffectType;
+use caps::models::effect::{EffectType, Passive, PassiveType};
 
 /// SET ZERO — the reference piece set. 6 pieces: a tower objective + 5
 /// units exercising different ability patterns. Stats and abilities are
@@ -27,6 +27,7 @@ fn cap_type_of(id: u16) -> Option<CapType> {
                 ability_description: "None",
                 ability_target: TargetType::None,
                 ability_range: array![],
+                passive: Passive { passive_type: PassiveType::None },
             },
         )
     } else if id == 1 {
@@ -50,6 +51,7 @@ fn cap_type_of(id: u16) -> Option<CapType> {
                     Vec2 { x: 0, y: 1 },
                     Vec2 { x: 1, y: 1 },
                 ],
+                passive: Passive { passive_type: PassiveType::None },
             },
         )
     } else if id == 2 {
@@ -73,6 +75,7 @@ fn cap_type_of(id: u16) -> Option<CapType> {
                     Vec2 { x: 0, y: 1 },
                     Vec2 { x: 1, y: 1 },
                 ],
+                passive: Passive { passive_type: PassiveType::None },
             },
         )
     } else if id == 3 {
@@ -96,6 +99,7 @@ fn cap_type_of(id: u16) -> Option<CapType> {
                     Vec2 { x: 0, y: 1 },
                     Vec2 { x: 1, y: 1 },
                 ],
+                passive: Passive { passive_type: PassiveType::None },
             },
         )
     } else if id == 4 {
@@ -124,6 +128,7 @@ fn cap_type_of(id: u16) -> Option<CapType> {
                     Vec2 { x: 2, y: 2 },
                     Vec2 { x: 3, y: 3 },
                 ],
+                passive: Passive { passive_type: PassiveType::None },
             },
         )
     } else if id == 5 {
@@ -144,6 +149,7 @@ fn cap_type_of(id: u16) -> Option<CapType> {
                 ability_description: "Take 2 damage; next attack +3",
                 ability_target: TargetType::SelfCap,
                 ability_range: array![],
+                passive: Passive { passive_type: PassiveType::None },
             },
         )
     } else {

@@ -34,7 +34,7 @@
   "contracts": [
     {
       "address": "0x595529996c02ab0520ceeba845944bc8be502ddb1678ffd313856a54a886baf",
-      "class_hash": "0x32d3e7bf67a967cc3a5a2702357431117021477f2ef1d63e3a72faec6e32c5f",
+      "class_hash": "0x3653d440ff6ef0fad03f4fcab5fcbcf176a019459beaa8c0b37194e57d26cc",
       "init_calldata": [],
       "tag": "caps-actions",
       "selector": "0x482dc9f44e8c68f3ef3ab58497e0d8e446ad2581a5544512fbaebef3af3ccbc",
@@ -50,7 +50,7 @@
     },
     {
       "address": "0x48bbea6f1a5490fbeea1fafe9d6326accf29eb9c3acc4ff17d42bcefb07ac7",
-      "class_hash": "0x61cf597b43aca78d80dd0480a03ae892d010b329f8a48f00540a2204f4d72cb",
+      "class_hash": "0x70aae7b0a0f09d4d749d4eb649c8fd17ff7d6b82d0e8ad6b40db909550ed2a5",
       "init_calldata": [],
       "tag": "caps-set_zero",
       "selector": "0x35ce53c0ff5c6ffb239bb347c5287062ae627c62c39204363d9153ba72a9377",
@@ -399,6 +399,36 @@
       "variants": []
     },
     {
+      "type": "enum",
+      "name": "caps::models::effect::Condition",
+      "variants": [
+        {
+          "name": "None",
+          "type": "()"
+        },
+        {
+          "name": "MinAlliesOnBoard",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "HasAdjacentAlly",
+          "type": "()"
+        },
+        {
+          "name": "EnemyInRange",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "HealthBelow",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "OnEnemyHalf",
+          "type": "()"
+        }
+      ]
+    },
+    {
       "type": "struct",
       "name": "caps::models::effect::Effect",
       "members": [
@@ -519,6 +549,94 @@
         {
           "name": "remaining_triggers",
           "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::Passive",
+      "members": [
+        {
+          "name": "passive_type",
+          "type": "caps::models::effect::PassiveType"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "caps::models::effect::PassiveType",
+      "variants": [
+        {
+          "name": "None",
+          "type": "()"
+        },
+        {
+          "name": "Aura",
+          "type": "caps::models::effect::SetPassiveAura"
+        },
+        {
+          "name": "DamageReduction",
+          "type": "caps::models::effect::SetPassiveDamageReduction"
+        },
+        {
+          "name": "ConditionalAttack",
+          "type": "caps::models::effect::SetPassiveConditionalAttack"
+        },
+        {
+          "name": "Regeneration",
+          "type": "caps::models::effect::SetPassiveRegeneration"
+        },
+        {
+          "name": "FreeFirstAttack",
+          "type": "()"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::SetPassiveAura",
+      "members": [
+        {
+          "name": "effect",
+          "type": "caps::models::effect::EffectType"
+        },
+        {
+          "name": "radius",
+          "type": "core::integer::u8"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::SetPassiveConditionalAttack",
+      "members": [
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "condition",
+          "type": "caps::models::effect::Condition"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::SetPassiveDamageReduction",
+      "members": [
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::effect::SetPassiveRegeneration",
+      "members": [
+        {
+          "name": "amount",
+          "type": "core::integer::u16"
         }
       ]
     },
@@ -1029,6 +1147,10 @@
         {
           "name": "ability_range",
           "type": "core::array::Array::<caps::models::game::Vec2>"
+        },
+        {
+          "name": "passive",
+          "type": "caps::models::effect::Passive"
         }
       ]
     },

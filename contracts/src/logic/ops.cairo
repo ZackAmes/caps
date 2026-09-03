@@ -58,8 +58,6 @@ fn step_dir(pos: Vec2, direction: u8) -> Vec2 {
     Vec2 { x, y }
 }
 
-/// Replace a cap in the array at idx with a new value (rebuilds the array —
-/// Cairo arrays have no index assignment).
 fn replace_at(ref caps: Array<Cap>, idx: usize, cap: Cap) {
     let mut new_caps: Array<Cap> = ArrayTrait::new();
     let mut k: usize = 0;
