@@ -99,20 +99,46 @@ fn is_surrounded(caps: @Array<Cap>, layout: u8, pos: Vec2) -> bool {
     true
 }
 
+use caps::models::effect::{Effect, EffectTarget};
+use caps::models::set_data::EffectSnapshot;
+
+fn _effect_snapshots(effects: @Array<Effect>) -> Span<EffectSnapshot> {
+    let mut snaps = ArrayTrait::new();
+    let mut i: usize = 0;
+    while i < effects.len() {
+        let e: Effect = *effects.at(i);
+        let cap_id = match e.target {
+            EffectTarget::Cap(id) => id,
+            _ => 0,
+        };
+        snaps.append(
+            EffectSnapshot {
+                effect_type: e.effect_type,
+                target_cap_id: cap_id,
+                remaining_triggers: e.remaining_triggers,
+            },
+        );
+        i += 1;
+    };
+    snaps.span()
+}
+
 #[dojo::contract]
 pub mod actions {
     use super::{
-        IActions, index_at, index_of_id, has_cap_at, is_surrounded, is_walkable,
+        IActions, index_at, index_of_id, has_cap_at, is_surrounded, is_walkable, _effect_snapshots,
         get_p1_deploy_spot, get_p2_deploy_spot, is_valid_step,
         LAYOUT_PERIMETER_5X5,
     };
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use caps::models::game::{Game, Global, Action, ActionType};
     use caps::models::cap::{Cap, Location, get_position};
+    use caps::models::effect::{Effect, EffectTarget};
     use caps::models::set::{Set, ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait};
+    use caps::models::set_data::{CapType, TargetType, AbilityContext, ActorInfo, CapInfo, EffectSnapshot};
+    use caps::logic::ops::apply_op;
     use caps::models::game::Hand;
     use caps::logic::hand::{is_in_hand, advance_cursor, HAND_SIZE};
-    use caps::models::set_data::{CapType, ActorInfo, CapInfo};
     use dojo::model::ModelStorage;
 
     pub const TEAM_SIZE: u8 = 6;
@@ -166,11 +192,25 @@ pub mod actions {
             assert!(caller == turn_player, "Not your turn");
 
             let layout = game.layout;
+            let set_id = game.set_id;
+
+            // ── Energy economy (docs/GAME_DESIGN.md §3.4) ──
+            let mut effects = self._load_effects(game_id, @game);
+
+            let mut energy: u8 = match game.turn_count {
+                0 => 0,
+                1 => 2,
+                2 => 2,
+                3 => 5,
+                4 => 5,
+                _ => 7,
+            };
+            game.energy = energy;
 
             let mut i: usize = 0;
             while i < turn.len() {
                 let action: Action = *turn.at(i);
-                let caps = alive_caps(@world, @game);
+                let mut caps = alive_caps(@world, @game);
                 let act_idx = index_of_id(@caps, action.cap_id);
                 assert!(act_idx < caps.len(), "Cap not found");
                 let mut cap: Cap = *caps.at(act_idx);
@@ -196,6 +236,9 @@ pub mod actions {
                         };
                         assert!(pos.x == deploy_pos.x && pos.y == deploy_pos.y,
                             "Must play at your deploy spot");
+                        let (_, play_cost, _, _) = self._stats(game.set_id, cap.cap_type);
+                        assert!(energy >= play_cost, "Not enough energy to deploy");
+                        energy -= play_cost;
                         cap.location = Location::Board(pos);
                         world.write_model(@cap);
 
@@ -214,6 +257,10 @@ pub mod actions {
                             is_valid_step(layout, cur, pos),
                             "Must move 1 step (orthogonal or diagonal) along layout",
                         );
+
+                        let (_, _, move_cost, _) = self._stats(game.set_id, cap.cap_type);
+                        assert!(energy >= move_cost, "Not enough energy to move");
+                        energy -= move_cost;
 
                         let tgt_idx = index_at(@caps, pos);
                         if tgt_idx < caps.len() {
@@ -243,9 +290,130 @@ pub mod actions {
                         world.write_model(@cap);
                     },
                     ActionType::Ability(pos) => {
-                        // v1: abilities stubbed — set contract dispatch lands
-                        // with the set_zero port. The op applier is live.
-                        let _ = pos;
+                        // Fetch the piece definition from the set contract
+                        let set: Set = world.read_model(game.set_id);
+                        let dispatcher = ISetInterfaceDispatcher {
+                            contract_address: set.address,
+                        };
+                        let cap_type: CapType = dispatcher
+                            .get_cap_type(cap.cap_type)
+                            .expect('Unknown cap type');
+
+                        // Energy charge
+                        assert!(energy >= cap_type.ability_cost, "Not enough energy");
+                        energy -= cap_type.ability_cost;
+
+                        // Target validation (declarative, from CapType)
+                        let actor_pos_v = get_position(@cap).unwrap();
+                        let mut in_range = false;
+                        let mut ri: usize = 0;
+                        while ri < cap_type.ability_range.len() {
+                            let off = *cap_type.ability_range.at(ri);
+                            if actor_pos_v.x == pos.x + off.x
+                                && actor_pos_v.y == pos.y + off.y {
+                                in_range = true;
+                                break;
+                            }
+                            ri += 1;
+                        };
+                        assert!(in_range, "Target out of ability range");
+
+                        let tgt_idx = index_at(@caps, pos);
+                        match cap_type.ability_target {
+                            TargetType::None => panic!("No ability"),
+                            TargetType::SelfCap => {},
+                            TargetType::TeamCap => {
+                                assert!(tgt_idx < caps.len(), "No cap at target");
+                                let t: Cap = *caps.at(tgt_idx);
+                                assert!(t.owner == caller, "Target is not friendly");
+                            },
+                            TargetType::OpponentCap => {
+                                assert!(tgt_idx < caps.len(), "No cap at target");
+                                let t: Cap = *caps.at(tgt_idx);
+                                assert!(t.owner != caller, "Target is not an enemy");
+                            },
+                            TargetType::AnyCap => {
+                                assert!(tgt_idx < caps.len(), "No cap at target");
+                            },
+                            TargetType::AnySquare => {},
+                        }
+
+                        // Build the ability context snapshot
+                        let mut cap_infos = ArrayTrait::new();
+                        let mut bi: usize = 0;
+                        while bi < caps.len() {
+                            let c: Cap = *caps.at(bi);
+                            let pos_v = get_position(@c);
+                            if pos_v.is_some() {
+                                let p = pos_v.unwrap();
+                                cap_infos.append(
+                                    CapInfo {
+                                        id: c.id,
+                                        owner: c.owner,
+                                        cap_type: c.cap_type,
+                                        x: p.x,
+                                        y: p.y,
+                                        health: c.health,
+                                    },
+                                );
+                            }
+                            bi += 1;
+                        };
+                        let actor_pos_v = get_position(@cap).unwrap();
+                        let ctx = AbilityContext {
+                            game_id: game.id,
+                            layout: game.layout,
+                            turn_count: game.turn_count,
+                            energy,
+                            actor: ActorInfo {
+                                id: cap.id,
+                                owner: cap.owner,
+                                cap_type: cap.cap_type,
+                                x: actor_pos_v.x,
+                                y: actor_pos_v.y,
+                                health: cap.health,
+                            },
+                            caps: cap_infos.span(),
+                            effects: _effect_snapshots(@effects),
+                        };
+
+                        // Dispatch to the set contract — pure function returning ops
+                        let output = dispatcher.activate_ability(ctx, pos);
+
+                        // Apply ops sequentially, bounded by the set's budget
+                        let mut next_effect_id: u64 = (game.effect_ids.len() + 1000)
+                            .try_into()
+                            .unwrap();
+                        let mut count: u8 = 0;
+                        let mut oi: usize = 0;
+                        while oi < output.ops.len() {
+                            if count >= set.max_ops_per_ability {
+                                break;
+                            }
+                            let op = *output.ops.at(oi);
+                            if apply_op(
+                                ref caps, ref effects, cap.id, cap.owner, layout,
+                                ref next_effect_id, op,
+                            ) {
+                                count += 1;
+                            }
+                            oi += 1;
+                        };
+
+                        // Persist mutated caps + new effects
+                        let mut wi: usize = 0;
+                        while wi < caps.len() {
+                            let c = *caps.at(wi);
+                            world.write_model(@c);
+                            wi += 1;
+                        };
+                        let mut ei: usize = 0;
+                        while ei < effects.len() {
+                            let e = *effects.at(ei);
+                            world.write_model(@e);
+                            game.effect_ids.append(e.effect_id);
+                            ei += 1;
+                        };
                     },
                     ActionType::ClaimCapture(pos) => {
                         assert!(cap.location != Location::Bench, "Not on board");
@@ -304,6 +472,7 @@ pub mod actions {
                 game.winner = game.player1;
             }
 
+            game.energy = energy;
             game.last_action_timestamp = get_block_timestamp();
             game.turn_count += 1;
             world.write_model(@game);
@@ -492,6 +661,22 @@ pub mod actions {
                 Option::Some(ct) => (ct.max_health, ct.play_cost, ct.move_cost, ct.attack),
                 Option::None => (8, 1, 1, 2),
             }
+        }
+
+        fn _load_effects(
+            ref self: ContractState, game_id: u64, game: @Game,
+        ) -> Array<Effect> {
+            let world = self.world_default();
+            let mut effects = ArrayTrait::new();
+            let mut i: usize = 0;
+            while i < game.effect_ids.len() {
+                let e: Effect = world.read_model((game_id, *game.effect_ids[i]));
+                if e.remaining_triggers > 0 {
+                    effects.append(e);
+                }
+                i += 1;
+            };
+            effects
         }
 
         fn _stats_attack(ref self: ContractState, set_id: u64, cap_type: u16) -> u16 {
