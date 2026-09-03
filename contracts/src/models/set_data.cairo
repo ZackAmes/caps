@@ -340,6 +340,13 @@ pub impl EffectTicker of EffectTickerTrait {
 
 /// Evaluate a condition against the board state.
 /// `cap` is the piece the condition belongs to, `caps` is all live caps.
+fn _get_loc(cap: Cap) -> Option<Vec2> {
+    match cap.location {
+        Location::Board(p) => Option::Some(p),
+        _ => Option::None,
+    }
+}
+
 #[generate_trait]
 pub impl ConditionEval of ConditionEvaluatorTrait {
     fn is_met(condition: Condition, cap: Cap, caps: @Array<Cap>) -> bool {

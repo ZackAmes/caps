@@ -133,10 +133,12 @@ pub mod actions {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use caps::models::game::{Game, Global, Action, ActionType};
     use caps::models::cap::{Cap, Location, get_position};
-    use caps::models::effect::{Effect, EffectTarget, Timing};
+    use caps::models::effect::{Effect, EffectTrait, EffectTarget, Timing};
     use caps::models::set_data::EffectTickerTrait;
     use caps::models::set::{Set, ISetInterfaceDispatcher, ISetInterfaceDispatcherTrait};
     use caps::models::set_data::{CapType, TargetType, AbilityContext, ActorInfo, CapInfo, EffectSnapshot};
+    use caps::models::effect::{Passive, PassiveType};
+    use caps::models::set_data::{apply_damage_reduction, conditional_attack_bonus};
     use caps::logic::ops::apply_op;
     use caps::models::game::Hand;
     use caps::logic::hand::{is_in_hand, advance_cursor, HAND_SIZE};
@@ -218,6 +220,59 @@ pub mod actions {
 
             let mut caps = alive_caps(@world, @game);
 
+            // ── Passive: Aura — for each living piece with an Aura passive,
+            // apply its effect to allies within radius (as effects with
+            // 1 trigger, refreshed each turn) ──
+            let mut ai: usize = 0;
+            while ai < caps.len() {
+                let source: Cap = *caps.at(ai);
+                if source.location == Location::Dead {
+                    ai += 1;
+                    continue;
+                }
+                let passive = self._get_passive(game.set_id, source.cap_type);
+                if let PassiveType::Aura(aura_data) = passive.passive_type {
+                    // Find allies within radius
+                    let mut ki: usize = 0;
+                    while ki < caps.len() {
+                        let ally: Cap = *caps.at(ki);
+                        if ally.id != source.id && ally.owner == source.owner
+                            && ally.location != Location::Dead {
+                            let src_pos = get_position(@source).unwrap();
+                            let ally_pos = get_position(@ally).unwrap();
+                            let dx: u32 = if ally_pos.x > src_pos.x {
+                                (ally_pos.x - src_pos.x).into()
+                            } else {
+                                (src_pos.x - ally_pos.x).into()
+                            };
+                            let dy: u32 = if ally_pos.y > src_pos.y {
+                                (ally_pos.y - src_pos.y).into()
+                            } else {
+                                (src_pos.y - ally_pos.y).into()
+                            };
+                            let d = if dx > dy { dx } else { dy };
+                            if d <= aura_data.radius.into() {
+                                let effect_id_raw: u64 = (game.effect_ids.len() + 1000 + ai * 10 + ki)
+                                    .try_into().unwrap();
+                                    let effect_id = effect_id_raw;
+                                effects.append(
+                                    EffectTrait::new(
+                                        game.id,
+                                        effect_id,
+                                        aura_data.effect,
+                                        EffectTarget::Cap(ally.id),
+                                        1,
+                                    ),
+                                );
+                            }
+                        }
+                        ki += 1;
+                    };
+                }
+                ai += 1;
+            };
+
+
             let mut i: usize = 0;
             while i < turn.len() {
                 let action: Action = *turn.at(i);
@@ -292,6 +347,16 @@ pub mod actions {
                             assert!(target.id != cap.id, "Cannot attack self");
                             assert!(target.owner != caller, "Tile is occupied by your own cap");
                             let (_, _, _, atk) = self._stats(game.set_id, cap.cap_type);
+
+                            // ── Passive: ConditionalAttack on the attacker ──
+                            let actor_passive = self._get_passive(game.set_id, cap.cap_type);
+                            let bonus = conditional_attack_bonus(actor_passive, cap, @caps);
+                            let atk = atk + bonus;
+
+                            // ── Passive: DamageReduction on the target ──
+                            let target_passive = self._get_passive(game.set_id, target.cap_type);
+                            let atk = apply_damage_reduction(target_passive, atk);
+
                             if target.shield >= atk {
                                 target.shield -= atk;
                             } else {
@@ -525,6 +590,27 @@ pub mod actions {
                     }
                 }
                 di += 1;
+            };
+
+            // ── Passive: Regeneration — heal each living piece by its passive amount ──
+            let mut ri: usize = 0;
+            while ri < caps.len() {
+                let mut cap_r: Cap = *caps.at(ri);
+                if cap_r.location != Location::Dead {
+                    let passive = self._get_passive(game.set_id, cap_r.cap_type);
+                    if let PassiveType::Regeneration(regen_data) = passive.passive_type {
+                        let max_hp: u16 = self._stats_max_health(game.set_id, cap_r.cap_type);
+                        if cap_r.health < max_hp {
+                            if cap_r.health + regen_data.amount > max_hp {
+                                cap_r.health = max_hp;
+                            } else {
+                                cap_r.health += regen_data.amount;
+                            }
+                            world.write_model(@cap_r);
+                        }
+                    }
+                }
+                ri += 1;
             };
 
             // Apply Heal effects
@@ -771,6 +857,18 @@ pub mod actions {
                 }
                 i += 1;
             };
+        }
+
+        /// Fetch the passive for a piece type from the set contract.
+        /// Returns None if the set doesn't define it.
+        fn _get_passive(ref self: ContractState, set_id: u64, cap_type: u16) -> Passive {
+            let world = self.world_default();
+            let set: Set = world.read_model(set_id);
+            let dispatcher = ISetInterfaceDispatcher { contract_address: set.address };
+            match dispatcher.get_cap_type(cap_type) {
+                Option::Some(ct) => ct.passive,
+                Option::None => Passive { passive_type: PassiveType::None },
+            }
         }
 
         fn _stats_attack(ref self: ContractState, set_id: u64, cap_type: u16) -> u16 {
