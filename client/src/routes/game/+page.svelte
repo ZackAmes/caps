@@ -3,8 +3,9 @@
     import {
         connect, getAccount, createGame, createSoloGame, takeTurn, getGame,
         getLayout, isValidStep, isSurroundedIn, LAYOUTS, LAYOUT_PERIMETER_5X5, isDevMode,
-        getHand,
-        type ChainGame, type ChainCap, type TurnAction, type LayoutConfig, type ChainHand, CAP_STATS,
+        getHand, getCapTypeCached, TARGET_LABELS, passiveLabel,
+        type ChainGame, type ChainCap, type TurnAction, type LayoutConfig,
+        type ChainHand, type CapTypeDef, CAP_STATS,
     } from '$lib/dojo/client';
 
     let account = $state<string | null>(null);
@@ -49,6 +50,8 @@
     let game = $state<ChainGame | null>(null);
 
     let hand = $state<ChainHand | null>(null);
+    let capDefMap = $state<Map<number, CapTypeDef>>(new Map());
+    let abilityTargetMode = $state(false);
     let selectedCapId = $state<number | null>(null);
     let queuedActions: TurnAction[] = $state([]);
     let committing = $state(false);
@@ -111,6 +114,46 @@
 
     function vibrate(ms: number) {
         try { navigator.vibrate?.(ms); } catch { /* not supported */ }
+    }
+
+    function capDefFor(c: ChainCap): CapTypeDef | undefined {
+        return capDefMap.get(c.capType);
+    }
+
+    function abilityTargets(cap: ChainCap): Map<string, { targetType: number }> {
+        const out = new Map<string, { targetType: number }>();
+        const def = capDefFor(cap);
+        if (!def || def.abilityCost === 0 || def.abilityTarget === 0) return out;
+        if (cap.x === null || cap.y === null) return out;
+        if (!game || game.energy < def.abilityCost) return out;
+        for (const [dx, dy] of def.abilityRange) {
+            const x = cap.x + dx;
+            const y = cap.y + dy;
+            if (!activeLayout.isWalkable(x, y)) continue;
+            const occ = capAt(x, y);
+            switch (def.abilityTarget) {
+                case 2: if (occ && occ.owner === myOwner()) out.set(`${x},${y}`, { targetType: 2 }); break;
+                case 3: if (occ && occ.owner !== myOwner()) out.set(`${x},${y}`, { targetType: 3 }); break;
+                case 4: if (occ) out.set(`${x},${y}`, { targetType: 4 }); break;
+                case 5: out.set(`${x},${y}`, { targetType: 5 }); break;
+            }
+        }
+        return out;
+    }
+
+    function abilityTargetModeStart() {
+        if (selectedCapId == null) return;
+        const cap = capById(selectedCapId);
+        if (!cap) return;
+        const def = capDefFor(cap);
+        if (!def || def.abilityTarget === 0 || def.abilityCost === 0) return;
+        if (def.abilityTarget === 1) {
+            queuedActions = [...queuedActions, { capId: cap.id, kind: 'Ability' as any, x: cap.x ?? 0, y: cap.y ?? 0 }];
+            status = `Queued ability: ${def.abilityDescription}`;
+            selectedCapId = null;
+            return;
+        }
+        abilityTargetMode = true;
     }
 
     function capAt(x: number, y: number): ChainCap | undefined {
@@ -278,6 +321,24 @@
         if (occ && isCaptureTarget(x, y)) {
             tryCapture(x, y);
             return;
+        }
+
+        // ability targeting
+        if (abilityTargetMode && selectedCapId != null) {
+            const cap = capById(selectedCapId);
+            if (cap) {
+                const targets = abilityTargets(cap);
+                if (targets.has(`${x},${y}`)) {
+                    queuedActions = [...queuedActions, { capId: selectedCapId, kind: 'Ability' as any, x, y }];
+                    status = `Queued ability → (${x},${y})`;
+                    vibrate(15);
+                    errorMsg = null;
+                    abilityTargetMode = false;
+                    selectedCapId = null;
+                    return;
+                }
+            }
+            abilityTargetMode = false;
         }
 
         if (selectedCapId != null) {
@@ -528,6 +589,13 @@
             // Load the current turn player's hand (public info)
             const slot = game.turnCount % 2;
             hand = await getHand(id, slot);
+            const uniqueTypes = new Set(game.caps.map(c => c.capType));
+            const newMap = new Map<number, CapTypeDef>();
+            for (const ct of uniqueTypes) {
+                const def = await getCapTypeCached(id, ct);
+                if (def) newMap.set(ct, def);
+            }
+            capDefMap = newMap;
             selectedCapId = null;
             queuedActions = [];
             status = `Loaded game #${id}`;
@@ -702,6 +770,12 @@
                     {@const selTargets = selCap && selCap.x !== null && selCap.y !== null ? moveTargets(selCap) : null}
                     {@const targetInfo = selTargets?.get(`${x},${y}`)}
                     {@const isCapture = !occ && isCaptureTarget(x, y)}
+                    {@const isAbilityTgt = selectedCapId != null && abilityTargetMode
+                        && (() => {
+                            const cap = capById(selectedCapId);
+                            if (!cap) return false;
+                            return abilityTargets(cap).has(`${x},${y}`);
+                        })()}
                     {@const dragOver = drag?.over?.x === x && drag?.over?.y === y}
                     <div
                         class="tile"
@@ -710,6 +784,7 @@
                         class:target-move={!!targetInfo && targetInfo.type === 'move'}
                         class:target-fight={!!targetInfo && targetInfo.type === 'fight'}
                         class:target-capture={isCapture}
+                        class:target-ability={isAbilityTgt}
                         class:drag-over={dragOver}
                         class:drag-ok={dragOver && drag?.valid}
                         class:drag-bad={dragOver && drag != null && !drag.valid}
@@ -750,6 +825,9 @@
                                     <div class="hp">{c.health}</div>
                                     {#if c.shield > 0}<div class="shield-badge">🛡{c.shield}</div>{/if}
                                     {#if c.stunnedTurns > 0}<div class="stun-badge">💫</div>{/if}
+                                    {#if capDefFor(c) && capDefFor(c)!.passiveType > 0}
+                                        <div class="passive-badge">✦</div>
+                                    {/if}
                                 </div>
                                 {#if isCaptureTarget(c.x, c.y)}
                                     <div class="cap-mark">⛓</div>
@@ -790,8 +868,38 @@
                 </p>
             {:else if selectedCapId != null}
                 <p class="hint">Tap or drag a highlighted tile — ⚔ means attack</p>
+                {@const selDef = capDefFor(capById(selectedCapId)!)}
+                {#if selDef && selDef.abilityCost > 0 && selDef.abilityTarget !== 0}
+                    <button
+                        class="ability-btn"
+                        onclick={abilityTargetModeStart}
+                        disabled={!game || game.energy < selDef.abilityCost}
+                    >
+                        ✨ Ability (⚡{selDef.abilityCost})
+                    </button>
+                {/if}
             {:else if captureTargets.length > 0 && isMyTurn()}
                 <p class="hint">⛓ A surrounded enemy can be captured — tap it</p>
+            {/if}
+
+            <!-- Selected piece info panel -->
+            {#if selectedCapId != null}
+                {@const selDef = capDefFor(capById(selectedCapId)!)}
+                {#if selDef}
+                    <div class="piece-info">
+                        <div class="pi-name">{selDef.name}</div>
+                        <div class="pi-stats">❤{selDef.maxHealth} ⚔{selDef.attack} ⚡{selDef.abilityCost}</div>
+                        {#if selDef.abilityDescription !== 'None' && selDef.abilityCost > 0}
+                            <div class="pi-ability">
+                                <span class="pi-cost">⚡{selDef.abilityCost}</span>
+                                {selDef.abilityDescription}
+                            </div>
+                        {/if}
+                        {#if selDef.passiveType > 0}
+                            <div class="pi-passive">✦ {passiveLabel(selDef)}</div>
+                        {/if}
+                    </div>
+                {/if}
             {/if}
 
             <!-- Bench -->
@@ -1101,6 +1209,58 @@
         color: #fff;
         margin-top: 1px;
     }
+    .piece-info {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 0.5rem 0.7rem;
+    }
+    .pi-name { font-weight: 700; font-size: 0.95rem; color: #e2e8f0; }
+    .pi-stats { font-size: 0.78rem; color: #94a3b8; margin: 0.1rem 0; }
+    .pi-ability {
+        font-size: 0.82rem;
+        color: #93c5fd;
+        padding: 0.3rem 0;
+        border-top: 1px solid #1e293b;
+        margin-top: 0.3rem;
+    }
+    .pi-cost {
+        background: #3b3305;
+        color: #fde047;
+        padding: 0.05rem 0.3rem;
+        border-radius: 3px;
+        font-size: 0.72rem;
+        margin-right: 0.3rem;
+    }
+    .pi-target { color: #64748b; font-size: 0.75rem; }
+    .pi-passive {
+        color: #a78bfa;
+        font-size: 0.8rem;
+        padding: 0.2rem 0 0;
+        border-top: 1px solid #1e293b;
+        margin-top: 0.2rem;
+    }
+    .passive-badge {
+        position: absolute;
+        bottom: -4px;
+        left: -4px;
+        font-size: 0.65rem;
+        color: #a78bfa;
+        filter: drop-shadow(0 0 2px #7c3aed);
+    }
+    .target-ability {
+        border-color: #e879f9 !important;
+        box-shadow: inset 0 0 10px rgba(232,121,249,0.4);
+    }
+    .ability-btn {
+        background: #7c3aed;
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #a78bfa;
+    }
+    .ability-btn:disabled { background: #1e1b4b; border-color: #312e81; }
     .locked-note {
         color: #64748b;
         font-size: 0.78rem;

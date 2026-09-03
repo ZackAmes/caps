@@ -237,6 +237,56 @@ export interface CapTypeDef {
   abilityDescription: string;
   abilityTarget: number; // TargetType enum index
   abilityRange: Array<[number, number]>;
+  passiveType: number; // PassiveType enum index (0 = None)
+  passiveAmount: number;
+  passiveCondition: number; // Condition enum index
+  passiveRadius: number;
+  passiveEffectType: number; // EffectType enum index (for Aura)
+}
+
+/** Target type labels for display. */
+export const TARGET_LABELS: Record<number, string> = {
+  0: 'None',
+  1: 'Self',
+  2: 'Ally',
+  3: 'Enemy',
+  4: 'Any piece',
+  5: 'Any tile',
+};
+
+/** Passive type labels for display. */
+export const PASSIVE_LABELS: Record<number, string> = {
+  0: '',
+  1: 'Aura',
+  2: 'Tough',       // DamageReduction
+  3: 'Berserk',     // ConditionalAttack
+  4: 'Regen',       // Regeneration
+  5: 'Swift',       // FreeFirstAttack
+};
+
+/** Condition labels for display. */
+export const CONDITION_LABELS: Record<number, string> = {
+  0: '',
+  1: '3+ allies on board',
+  2: 'has adjacent ally',
+  3: 'enemy in range',
+  4: 'low health',
+  5: 'on enemy half',
+};
+
+/** Human-readable passive description from parsed passive fields. */
+export function passiveLabel(def: CapTypeDef): string {
+  const type = def.passiveType;
+  if (type === 0) return '';
+  const label = PASSIVE_LABELS[type] ?? 'Unknown';
+  const cond = CONDITION_LABELS[def.passiveCondition];
+  if (type === 2) return `${label}: -${def.passiveAmount} dmg taken`;
+  if (type === 3) {
+    return cond
+      ? `${label}: +${def.passiveAmount} atk while ${cond}`
+      : `${label}: +${def.passiveAmount} atk`;
+  }
+  return label;
 }
 
 /** Fetch a piece definition from the game's set contract. */
@@ -299,6 +349,36 @@ export async function getCapType(
     const ry = num(f[i++]);
     abilityRange.push([rx, ry]);
   }
+  // Passive: struct { passive_type: PassiveType }
+  // PassiveType is an enum — parse variant index + payload
+  const passiveVariant = num(f[i++]);
+  let passiveType = 0;
+  let passiveAmount = 0;
+  let passiveCondition = 0;
+  let passiveRadius = 0;
+  let passiveEffectType = 0;
+  if (passiveVariant === 1) {
+    // Aura: SetPassiveAura { effect: EffectType, radius: u8 }
+    passiveType = 1;
+    passiveEffectType = num(f[i++]);
+    passiveRadius = num(f[i++]);
+  } else if (passiveVariant === 2) {
+    // DamageReduction: SetPassiveDamageReduction { amount: u16 }
+    passiveType = 2;
+    passiveAmount = num(f[i++]);
+  } else if (passiveVariant === 3) {
+    // ConditionalAttack: SetPassiveConditionalAttack { amount: u16, condition: Condition }
+    passiveType = 3;
+    passiveAmount = num(f[i++]);
+    passiveCondition = num(f[i++]);
+  } else if (passiveVariant === 4) {
+    // Regeneration: SetPassiveRegeneration { amount: u16 }
+    passiveType = 4;
+    passiveAmount = num(f[i++]);
+  } else if (passiveVariant === 5) {
+    // FreeFirstAttack: unit variant, no payload
+    passiveType = 5;
+  }
 
   return {
     id,
@@ -314,6 +394,11 @@ export async function getCapType(
     abilityDescription,
     abilityTarget,
     abilityRange,
+    passiveType,
+    passiveAmount,
+    passiveCondition,
+    passiveRadius,
+    passiveEffectType,
   };
 }
 
@@ -500,6 +585,24 @@ export async function takeTurn(gameId: number, actions: TurnAction[]): Promise<v
 function num(v: string): number {
   const n = Number(v);
   return typeof n === "number" && !Number.isNaN(n) ? n : 0;
+}
+
+/** In-memory cache of cap type definitions per game (gameId -> typeId -> def). */
+const capTypeCache: Map<number, Map<number, CapTypeDef>> = new Map();
+
+export async function getCapTypeCached(gameId: number, capTypeId: number): Promise<CapTypeDef | null> {
+  if (!capTypeCache.has(gameId)) {
+    capTypeCache.set(gameId, new Map());
+  }
+  const cache = capTypeCache.get(gameId)!;
+  if (cache.has(capTypeId)) {
+    return cache.get(capTypeId)!;
+  }
+  const def = await getCapType(gameId, capTypeId);
+  if (def) {
+    cache.set(capTypeId, def);
+  }
+  return def;
 }
 
 export async function getGame(gameId: number): Promise<ChainGame | null> {
