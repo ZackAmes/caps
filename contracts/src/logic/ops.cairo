@@ -1,12 +1,11 @@
-use caps::models::game::Vec2;
-use caps::models::cap::{Cap, Location};
-use caps::models::effect::{Effect, EffectTrait, EffectType, EffectTarget};
-use caps::models::set_data::{
-    SetOp, SetOpDamage, SetOpHeal, SetOpShield, SetOpSacrifice, SetOpPush,
-    SetOpTeleport, SetOpSwap, SetOpApplyEffect, SetOpCleanse,
-    SetOpCleansePositive,
-};
 use caps::logic::track::is_walkable;
+use caps::models::cap::{Cap, Location};
+use caps::models::effect::{Effect, EffectTarget, EffectTrait, EffectType};
+use caps::models::game::Vec2;
+use caps::models::set_data::{
+    SetOp, SetOpApplyEffect, SetOpCleanse, SetOpCleansePositive, SetOpDamage, SetOpHeal, SetOpPush,
+    SetOpSacrifice, SetOpShield, SetOpSwap, SetOpTeleport,
+};
 use core::num::traits::SaturatingAdd;
 
 fn find_idx(caps: @Array<Cap>, cap_id: u64) -> Option<usize> {
@@ -16,7 +15,7 @@ fn find_idx(caps: @Array<Cap>, cap_id: u64) -> Option<usize> {
             return Option::Some(i);
         }
         i += 1;
-    };
+    }
     Option::None
 }
 
@@ -29,7 +28,7 @@ fn occupied(caps: @Array<Cap>, pos: Vec2) -> bool {
             }
         }
         i += 1;
-    };
+    }
     false
 }
 
@@ -68,7 +67,7 @@ fn replace_at(ref caps: Array<Cap>, idx: usize, cap: Cap) {
             new_caps.append(*caps.at(k));
         }
         k += 1;
-    };
+    }
     caps = new_caps;
 }
 
@@ -80,7 +79,8 @@ pub fn apply_op(
     ref caps: Array<Cap>,
     ref effects: Array<Effect>,
     actor_id: u64,
-    actor_owner: felt252,
+    actor_slot: u8,
+    game_id: u64,
     layout: u8,
     ref next_effect_id: u64,
     op: SetOp,
@@ -89,15 +89,17 @@ pub fn apply_op(
         SetOp::Damage(d) => apply_damage(ref caps, d),
         SetOp::Heal(h) => apply_heal(ref caps, h),
         SetOp::Shield(s) => apply_shield(ref caps, s),
-        SetOp::Sacrifice(s) => apply_sacrifice(ref caps, s, actor_id, actor_owner),
+        SetOp::Sacrifice(s) => apply_sacrifice(ref caps, s, actor_id, actor_slot),
         SetOp::Push(p) => apply_push(ref caps, p, layout),
         SetOp::Teleport(t) => apply_teleport(ref caps, t, layout),
         SetOp::Swap(s) => apply_swap(ref caps, s),
-        SetOp::ApplyEffect(a) => apply_effect(ref caps, ref effects, ref next_effect_id, a),
+        SetOp::ApplyEffect(a) => apply_effect(
+            ref caps, ref effects, ref next_effect_id, game_id, a,
+        ),
         SetOp::Cleanse(c) => apply_cleanse(ref caps, ref effects, c),
         SetOp::CleansePositive(c) => apply_cleanse_positive(ref caps, ref effects, c),
         // Summon needs core coordination (minting) — intercepted by actions.
-        SetOp::Summon(_) => false,
+        SetOp::Summon(_) | SetOp::ExtraMoves(_) | SetOp::ExtraActions(_) => false,
         // Zones are a v2 feature.
     }
 }
@@ -160,7 +162,7 @@ pub fn apply_shield(ref caps: Array<Cap>, op: SetOpShield) -> bool {
 }
 
 pub fn apply_sacrifice(
-    ref caps: Array<Cap>, op: SetOpSacrifice, actor_id: u64, actor_owner: felt252,
+    ref caps: Array<Cap>, op: SetOpSacrifice, actor_id: u64, actor_slot: u8,
 ) -> bool {
     if op.target_cap == actor_id {
         return false;
@@ -170,7 +172,7 @@ pub fn apply_sacrifice(
         Option::None => { return false; },
     };
     let mut cap: Cap = *caps.at(idx);
-    if cap.location == Location::Dead || cap.owner != actor_owner {
+    if cap.location == Location::Dead || cap.player_slot != actor_slot {
         return false;
     }
     cap.location = Location::Dead;
@@ -208,7 +210,7 @@ pub fn apply_push(ref caps: Array<Cap>, op: SetOpPush, layout: u8) -> bool {
         cur_y = next.y;
         moved += 1;
         i += 1;
-    };
+    }
     if moved == 0 {
         return false;
     }
@@ -264,7 +266,10 @@ pub fn apply_swap(ref caps: Array<Cap>, op: SetOpSwap) -> bool {
 }
 
 pub fn apply_effect(
-    ref caps: Array<Cap>, ref effects: Array<Effect>, ref next_effect_id: u64,
+    ref caps: Array<Cap>,
+    ref effects: Array<Effect>,
+    ref next_effect_id: u64,
+    game_id: u64,
     op: SetOpApplyEffect,
 ) -> bool {
     if op.triggers == 0 {
@@ -279,9 +284,12 @@ pub fn apply_effect(
     }
     let effect_id = next_effect_id;
     next_effect_id += 1;
-    effects.append(
-        EffectTrait::new(1, effect_id, op.effect, EffectTarget::Cap(op.target_cap), op.triggers),
-    );
+    effects
+        .append(
+            EffectTrait::new(
+                game_id, effect_id, op.effect, EffectTarget::Cap(op.target_cap), op.triggers,
+            ),
+        );
     true
 }
 
@@ -311,14 +319,14 @@ fn remove_effects(ref effects: Array<Effect>, target_cap: u64, positive: bool) -
                         remaining.append(*effects.at(j));
                     }
                     j += 1;
-                };
+                }
                 effects = remaining;
                 removed = true;
                 continue;
             }
         }
         i += 1;
-    };
+    }
     removed
 }
 

@@ -21,5 +21,6 @@ allow-prebuilt-plugins = ["dojo_cairo_macros"]
 
 [dev-dependencies]
 cairo_test = "=2.13"
+dojo_cairo_test = { git = "https://github.com/dojoengine/dojo", tag = "v1.8.0" }
 
 [profile.sepolia]

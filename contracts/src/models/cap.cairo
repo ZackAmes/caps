@@ -7,6 +7,8 @@ pub struct Cap {
     #[key]
     pub id: u64,
     pub owner: felt252,
+    /// Side identity, independent of wallet (solo uses the same wallet).
+    pub player_slot: u8,
     /// Piece type id within the game's set.
     pub cap_type: u16,
     /// Which set contract defines this piece.
@@ -18,6 +20,8 @@ pub struct Cap {
     pub shield: u16,
     /// Turns remaining on the cap's stun.
     pub stunned_turns: u8,
+    /// Global turn index at which this captured piece can deploy again.
+    pub available_turn: u64,
 }
 
 #[derive(Copy, Drop, Serde, PartialEq, DojoStore, Default, Debug, Introspect)]
@@ -30,9 +34,21 @@ pub enum Location {
 
 /// Chebyshev distance between two cells (for adjacency & range checks).
 pub fn dist(a: Vec2, b: Vec2) -> u32 {
-    let dx: u32 = if a.x > b.x { (a.x - b.x).into() } else { (b.x - a.x).into() };
-    let dy: u32 = if a.y > b.y { (a.y - b.y).into() } else { (b.y - a.y).into() };
-    if dx > dy { dx } else { dy }
+    let dx: u32 = if a.x > b.x {
+        (a.x - b.x).into()
+    } else {
+        (b.x - a.x).into()
+    };
+    let dy: u32 = if a.y > b.y {
+        (a.y - b.y).into()
+    } else {
+        (b.y - a.y).into()
+    };
+    if dx > dy {
+        dx
+    } else {
+        dy
+    }
 }
 
 /// Get board position if on board.

@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { previewTurn } from '$lib/dojo/preview';
     import {
-        connect, getAccount, createGame, createSoloGame, takeTurn, getGame,
-        getLayout, isValidStep, isSurroundedIn, LAYOUTS, LAYOUT_PERIMETER_5X5, isDevMode,
-        getHand, getCapTypeCached, TARGET_LABELS, passiveLabel,
+        connect, createGame, createSoloGame, takeTurn, getGame,
+        getLayout, isValidStep, LAYOUTS, LAYOUT_PERIMETER_5X5, isDevMode,
+        getHand, getCapTypeCached, passiveLabel,
         type ChainGame, type ChainCap, type TurnAction, type LayoutConfig,
-        type ChainHand, type CapTypeDef, CAP_STATS,
+        type ChainHand, type CapTypeDef,
     } from '$lib/dojo/client';
 
     let account = $state<string | null>(null);
@@ -50,6 +50,7 @@
     let game = $state<ChainGame | null>(null);
 
     let hand = $state<ChainHand | null>(null);
+    let opponentHand = $state<ChainHand | null>(null);
     let capDefMap = $state<Map<number, CapTypeDef>>(new Map());
     let abilityTargetMode = $state(false);
     let selectedCapId = $state<number | null>(null);
@@ -59,41 +60,9 @@
     let activeLayout = $derived<LayoutConfig>(getLayout(game ? game.layout : selectedLayout));
     let isSolo = $derived<boolean>(!!game && game.player1 === game.player2);
 
-    // Optimistic simulation: game caps with queued actions applied.
-    // Powers rendering + validation so multi-action turns feel real.
-    let simCaps = $derived.by((): ChainCap[] => {
-        if (!game) return [];
-        const caps = game.caps.map(c => ({ ...c }));
-        for (const qa of queuedActions) {
-            const mover = caps.find(c => c.id === qa.capId);
-            if (!mover) continue;
-            const target = caps.find(c => c.x === qa.x && c.y === qa.y);
-            if (qa.kind === 'Play') {
-                if (mover.x === null) { mover.x = qa.x; mover.y = qa.y; }
-            } else if (qa.kind === 'Move') {
-                if (mover.x === null || mover.y === null) continue;
-                if (target && target.id !== mover.id) {
-                    const isEnemy = target.owner !== mover.owner;
-                    const atk = CAP_STATS[mover.capType]?.[1] ?? 0;
-                    if (isEnemy && target.health <= atk) {
-                        // kill: mover takes the tile
-                        target.x = null; target.y = null;
-                        mover.x = qa.x; mover.y = qa.y;
-                    }
-                    // survive: nothing changes positionally
-                } else if (!target) {
-                    mover.x = qa.x; mover.y = qa.y;
-                }
-            } else if (qa.kind === 'ClaimCapture') {
-                if (target) { target.x = null; target.y = null; }
-            }
-        }
-        return caps;
-    });
-
-
-    // Board geometry for pointer → cell hit-testing
-    let boardEl: HTMLDivElement | undefined = $state();
+    let preview = $derived(game ? previewTurn(game, hand, capDefMap, activeLayout, queuedActions) : null);
+    let remainingEnergy = $derived(preview?.energy ?? 0);
+    let simCaps = $derived(preview?.caps ?? []);
 
     function cellFromPoint(px: number, py: number): { x: number; y: number } | null {
         const el = document.elementFromPoint(px, py);
@@ -123,17 +92,16 @@
     function abilityTargets(cap: ChainCap): Map<string, { targetType: number }> {
         const out = new Map<string, { targetType: number }>();
         const def = capDefFor(cap);
-        if (!def || def.abilityCost === 0 || def.abilityTarget === 0) return out;
+        if (!def || def.abilityTarget === 0) return out;
         if (cap.x === null || cap.y === null) return out;
-        if (!game || game.energy < def.abilityCost) return out;
-        for (const [dx, dy] of def.abilityRange) {
-            const x = cap.x + dx;
-            const y = cap.y + dy;
+        if (!game || remainingEnergy < def.abilityCost) return out;
+        for (let x = 0; x < activeLayout.width; x++) for (let y = 0; y < activeLayout.height; y++) {
+            if (!def.abilityRange.some(([dx, dy]) => Math.abs(x - cap.x!) === dx && Math.abs(y - cap.y!) === dy)) continue;
             if (!activeLayout.isWalkable(x, y)) continue;
             const occ = capAt(x, y);
             switch (def.abilityTarget) {
-                case 2: if (occ && occ.owner === myOwner()) out.set(`${x},${y}`, { targetType: 2 }); break;
-                case 3: if (occ && occ.owner !== myOwner()) out.set(`${x},${y}`, { targetType: 3 }); break;
+                case 2: if (occ && isMyCap(occ)) out.set(`${x},${y}`, { targetType: 2 }); break;
+                case 3: if (occ && !isMyCap(occ)) out.set(`${x},${y}`, { targetType: 3 }); break;
                 case 4: if (occ) out.set(`${x},${y}`, { targetType: 4 }); break;
                 case 5: out.set(`${x},${y}`, { targetType: 5 }); break;
             }
@@ -146,11 +114,12 @@
         const cap = capById(selectedCapId);
         if (!cap) return;
         const def = capDefFor(cap);
-        if (!def || def.abilityTarget === 0 || def.abilityCost === 0) return;
+        if (!def || def.abilityTarget === 0) return;
         if (def.abilityTarget === 1) {
-            queuedActions = [...queuedActions, { capId: cap.id, kind: 'Ability' as any, x: cap.x ?? 0, y: cap.y ?? 0 }];
-            status = `Queued ability: ${def.abilityDescription}`;
-            selectedCapId = null;
+            if (queueAction(cap.id, 'Ability', cap.x ?? 0, cap.y ?? 0)) {
+                status = `Queued ability: ${def.abilityDescription}`;
+                selectedCapId = null;
+            }
             return;
         }
         abilityTargetMode = true;
@@ -175,46 +144,37 @@
     }
 
     function isMyCap(c: ChainCap): boolean {
-        return myOwner() !== null && c.owner === myOwner();
+        if (!account || !game) return false;
+        const slot = isSolo ? game.turnCount % 2 : (BigInt(account) === BigInt(game.player1) ? 0 : 1);
+        return c.playerSlot === slot && BigInt(c.owner) === BigInt(account);
     }
 
     function isMyTurn(): boolean {
         if (!game || !account) return false;
-        return turnPlayerAddress() === account;
+        return BigInt(turnPlayerAddress()!) === BigInt(account);
     }
 
     function canAct(): boolean {
-        return !!game && !game.over && isMyTurn();
+        return !!game && !game.over && isMyTurn() && !committing && busy === null;
     }
 
     function benchCaps(): ChainCap[] {
-        return simCaps.filter(c => c.x === null);
+        return simCaps.filter(c => c.x === null && !c.dead);
     }
 
     function myBenchCaps(): ChainCap[] {
         const owner = myOwner();
         if (!owner) return [];
-        let candidates = benchCaps().filter(c => c.owner === owner);
-        // Hand filter: only pieces in the current hand window are playable
-        if (hand) {
-            const windowSet = new Set(hand.window);
-            candidates = candidates.filter(c => windowSet.has(c.id));
-        }
-        return candidates;
+        const ids = new Set(preview?.hand ?? []);
+        return benchCaps().filter(c => c.playerSlot === game!.turnCount % 2 && ids.has(c.id));
     }
 
     /** Bench pieces waiting for the hand cycle to come around. */
     function lockedBenchCount(): number {
         const owner = myOwner();
         if (!owner) return 0;
-        const all = benchCaps().filter(c => c.owner === owner);
+        const all = benchCaps().filter(c => c.playerSlot === game!.turnCount % 2);
         return all.length - myBenchCaps().length;
-    }
-
-    function myBoardCaps(): ChainCap[] {
-        const owner = myOwner();
-        if (!owner) return [];
-        return simCaps.filter(c => c.x !== null && c.owner === owner);
     }
 
     function isDeploySpot(x: number, y: number): boolean {
@@ -231,7 +191,7 @@
     function moveTargets(cap: ChainCap): Map<string, { type: 'move' | 'fight'; dmg?: number }> {
         const out = new Map<string, { type: 'move' | 'fight'; dmg?: number }>();
         if (cap.x === null || cap.y === null) return out;
-        const dmg = CAP_STATS[cap.capType]?.[1] ?? 0;
+        const dmg = capDefFor(cap)?.attack ?? 0;
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx === 0 && dy === 0) continue;
@@ -240,36 +200,26 @@
                 if (!isValidStep(game!.layout, [cap.x, cap.y], [x, y])) continue;
                 const occ = capAt(x, y);
                 if (!occ) out.set(`${x},${y}`, { type: 'move' });
-                else if (occ.owner !== myOwner() && occ.id !== cap.id) out.set(`${x},${y}`, { type: 'fight', dmg });
+                else if (!isMyCap(occ) && occ.id !== cap.id) out.set(`${x},${y}`, { type: 'fight', dmg });
             }
         }
         return out;
     }
 
-    /** Chained (surrounded) enemies on the sim board — capturable by any of my board caps. */
-    let captureTargets = $derived.by((): { x: number; y: number }[] => {
-        if (!game) return [];
-        const g = game;
-        const owner = myOwner();
-        if (!owner || myBoardCaps().length === 0) return [];
-        return simCaps
-            .filter(c => c.x !== null && c.y !== null && c.owner !== owner &&
-                         isSurroundedIn(simCaps, g.layout, c.x!, c.y!))
-            .map(c => ({ x: c.x!, y: c.y! }));
-    });
-
-    function isCaptureTarget(x: number, y: number): boolean {
-        return captureTargets.some(t => t.x === x && t.y === y);
-    }
-
-    // Action queueing (shared by tap + drag)
-    function queueAction(capId: number, kind: TurnAction['kind'], x: number, y: number) {
-        queuedActions = [...queuedActions, { capId, kind, x, y }];
-        const labels: Record<string, string> = { Play: '⬇ deploy', Move: '→ move', ClaimCapture: '⛓ capture' };
-        status = `Queued ${labels[kind]} → (${x},${y})`;
-        errorMsg = null;
-        log(`Queued ${kind} → (${x},${y})`);
-        vibrate(15);
+    function queueAction(capId: number, kind: TurnAction['kind'], x: number, y: number): boolean {
+        if (!game || !canAct()) return false;
+        const next = [...queuedActions, { capId, kind, x, y }];
+        try {
+            previewTurn(game, hand, capDefMap, activeLayout, next);
+            queuedActions = next;
+            status = `Queued ${kind} → (${x},${y})`;
+            errorMsg = null;
+            vibrate(15);
+            return true;
+        } catch (e) {
+            errorMsg = e instanceof Error ? e.message : String(e);
+            return false;
+        }
     }
 
     function tryDeploy(capId: number): boolean {
@@ -279,8 +229,7 @@
             log('Deploy spot occupied', 'error');
             return false;
         }
-        queueAction(capId, 'Play', dx, dy);
-        return true;
+        return queueAction(capId, 'Play', dx, dy);
     }
 
     function tryMove(capId: number, x: number, y: number): boolean {
@@ -289,22 +238,7 @@
         const targets = moveTargets(cap);
         const t = targets.get(`${x},${y}`);
         if (!t) return false;
-        queueAction(capId, 'Move', x, y);
-        return true;
-    }
-
-    function tryCapture(x: number, y: number): boolean {
-        const claimer = selectedCapId != null
-            ? capById(selectedCapId)
-            : myBoardCaps()[0];
-        if (!claimer || claimer.x === null) {
-            errorMsg = 'You need a piece on the board to capture';
-            log('Capture needs a board piece', 'error');
-            return false;
-        }
-        queueAction(claimer.id, 'ClaimCapture', x, y);
-        selectedCapId = null;
-        return true;
+        return queueAction(capId, 'Move', x, y);
     }
 
     // Tap resolution
@@ -312,33 +246,25 @@
         if (!canAct() || !activeLayout.isWalkable(x, y)) return;
         const occ = capAt(x, y);
 
-        if (occ && isMyCap(occ)) {
-            selectedCapId = selectedCapId === occ.id ? null : occ.id;
-            return;
-        }
-
-        // capture affordance: tap a chained enemy
-        if (occ && isCaptureTarget(x, y)) {
-            tryCapture(x, y);
-            return;
-        }
-
         // ability targeting
         if (abilityTargetMode && selectedCapId != null) {
             const cap = capById(selectedCapId);
             if (cap) {
                 const targets = abilityTargets(cap);
                 if (targets.has(`${x},${y}`)) {
-                    queuedActions = [...queuedActions, { capId: selectedCapId, kind: 'Ability' as any, x, y }];
-                    status = `Queued ability → (${x},${y})`;
-                    vibrate(15);
-                    errorMsg = null;
-                    abilityTargetMode = false;
-                    selectedCapId = null;
-                    return;
+                    if (queueAction(selectedCapId, 'Ability', x, y)) {
+                        abilityTargetMode = false;
+                        selectedCapId = null;
+                        return;
+                    }
                 }
             }
             abilityTargetMode = false;
+        }
+
+        if (occ && isMyCap(occ)) {
+            selectedCapId = selectedCapId === occ.id ? null : occ.id;
+            return;
         }
 
         if (selectedCapId != null) {
@@ -584,20 +510,23 @@
         try {
             const id = Number(gameIdInput);
             if (Number.isNaN(id) || id <= 0) throw new Error('Enter a valid game id');
-            game = await getGame(id);
-            if (!game) throw new Error(`Game ${id} not found`);
-            // Load the current turn player's hand (public info)
-            const slot = game.turnCount % 2;
-            hand = await getHand(id, slot);
-            const uniqueTypes = new Set(game.caps.map(c => c.capType));
+            const nextGame = await getGame(id);
+            if (!nextGame) throw new Error(`Game ${id} not found`);
+            const slot = nextGame.turnCount % 2;
+            const [nextHand, nextOpponentHand] = await Promise.all([getHand(id, slot), getHand(id, 1 - slot)]);
+            const uniqueTypes = [...new Set(nextGame.caps.map(c => c.capType))];
+            const definitions = await Promise.all(uniqueTypes.map(ct => getCapTypeCached(id, ct)));
             const newMap = new Map<number, CapTypeDef>();
-            for (const ct of uniqueTypes) {
-                const def = await getCapTypeCached(id, ct);
-                if (def) newMap.set(ct, def);
-            }
-            capDefMap = newMap;
-            selectedCapId = null;
+            for (const def of definitions) if (def) newMap.set(def.id, def);
+            if (newMap.size !== uniqueTypes.length) throw new Error('Unable to load all piece definitions');
+            // Install a complete snapshot together; do not replay the previous queue on a new turn.
             queuedActions = [];
+            selectedCapId = null;
+            abilityTargetMode = false;
+            capDefMap = newMap;
+            hand = nextHand;
+            opponentHand = nextOpponentHand;
+            game = nextGame;
             status = `Loaded game #${id}`;
             log(`Loaded game #${id} (turn ${game.turnCount}, layout ${game.layout})`);
         } catch (e: any) {
@@ -606,13 +535,8 @@
         }
     }
 
-    function colorFor(c: ChainCap): string {
-        if (!game) return '#3b82f6';
-        return c.owner === game.player1 ? '#3b82f6' : '#ef4444';
-    }
-
     async function commitTurn() {
-        if (!game || queuedActions.length === 0) return;
+        if (!game || game.over || !isMyTurn()) return;
         errorMsg = null;
         committing = true;
         log(`Submitting ${queuedActions.length} action(s)…`);
@@ -631,18 +555,20 @@
     }
 
     function removeQueuedAction(index: number) {
-        queuedActions = queuedActions.filter((_, i) => i !== index);
+        // Later actions may depend on this move, deployment, or ability grant.
+        queuedActions = queuedActions.slice(0, index);
     }
 
     function pct(pos: number, size: number): string {
         return `${((pos + 0.5) / size) * 100}%`;
     }
 
-    onMount(() => {});
 </script>
 
 <svelte:head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>CAPS — Onchain Strategy Game</title>
+    <meta name="description" content="Play CAPS, a tactical onchain board game on Starknet." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f172a" />
 </svelte:head>
 
@@ -662,7 +588,7 @@
         <!-- Lobby -->
         <section class="lobby">
             {#if errorMsg}
-                <div class="error">{errorMsg}</div>
+                <div class="error" role="alert">{errorMsg}</div>
             {/if}
             {#if !account}
                 <button class="primary big" onclick={handleConnect} disabled={busy !== null}>
@@ -695,15 +621,11 @@
                     <div class="fund-body">
                         <p class="hint">1. Tap the address above to copy it.</p>
                         <p class="hint">2. Get free Sepolia STRK from a faucet:</p>
-                        <a class="faucet-link" href="https://starknet-faucet.vercel.app/" target="_blank" rel="noopener">starknet-faucet.vercel.app ↗</a>
-                        <a class="faucet-link" href="https://sepolia.starkscan.co/faucet" target="_blank" rel="noopener">sepolia.starkscan.co/faucet ↗</a>
+                        <a class="faucet-link" href="https://starknet-faucet.vercel.app/" target="_blank" rel="noopener noreferrer">starknet-faucet.vercel.app ↗</a>
+                        <a class="faucet-link" href="https://sepolia.starkscan.co/faucet" target="_blank" rel="noopener noreferrer">sepolia.starkscan.co/faucet ↗</a>
                         <p class="hint">3. Paste your address there, receive STRK, then retry your turn.</p>
                     </div>
                 </details>
-                {#if busy}
-                    <div class="busy"><span class="spinner"></span>{busy}</div>
-                {/if}
-
                 <div class="divider"><span>or play vs opponent</span></div>
 
                 <div class="field">
@@ -715,7 +637,8 @@
                 <div class="divider"><span>load existing</span></div>
 
                 <div class="field row">
-                    <input bind:value={gameIdInput} type="number" placeholder="Game id" />
+                    <label class="sr-only" for="game-id">Game id</label>
+                    <input id="game-id" bind:value={gameIdInput} type="number" min="1" inputmode="numeric" placeholder="Game id" />
                     <button onclick={handleLoad}>Load</button>
                 </div>
             {/if}
@@ -729,12 +652,13 @@
                 <span class="turn-badge {game.turnCount % 2 === 0 ? 'p1' : 'p2'}">
                     {game.turnCount % 2 === 0 ? "P1" : "P2"}
                 </span>
-                <span class="energy-badge" title="Energy this turn">⚡ {game.energy}</span>
+                <span class="energy-badge" title="Energy remaining this turn">⚡ {remainingEnergy}/5</span>
+                <span>{preview?.actions ?? 1} action · {preview?.moves ?? 0} bonus moves</span>
             </div>
 
             {#if game.over}
                 <div class="gameover">
-                    {game.winner === '0' ? 'Draw!' : `Winner: ${game.winner.slice(0, 10)}…`}
+                    Player {game.winnerSlot + 1} reached the goal!
                 </div>
             {/if}
 
@@ -745,15 +669,19 @@
             {/if}
 
             {#if errorMsg}
-                <div class="error">{errorMsg}</div>
+                <div class="error" role="alert">{errorMsg}</div>
             {/if}
 
+            <p class="hint">Reach the center of the opponent’s back row. One deploy or move/attack per turn; abilities use energy. Surround captures are automatic.</p>
+            <p class="hint">Income: 1 per turn + 1 per occupied ⚡ square + on-board generators. Energy carries over, up to 5.</p>
+            {#if preview?.winnerSlot !== null && preview?.winnerSlot !== undefined && !game.over}
+                <p class="gameover">Goal reached in preview — submit to confirm.</p>
+            {/if}
             <!-- Board: static tiles + gliding pieces layer -->
             <div
                 class="board"
                 role="application"
                 aria-label="Game board"
-                bind:this={boardEl}
                 style="--w:{activeLayout.width};--h:{activeLayout.height}"
                 onpointerdown={onPointerDown}
                 onpointermove={onPointerMove}
@@ -769,7 +697,7 @@
                     {@const selCap = selectedCapId != null ? capById(selectedCapId) : null}
                     {@const selTargets = selCap && selCap.x !== null && selCap.y !== null ? moveTargets(selCap) : null}
                     {@const targetInfo = selTargets?.get(`${x},${y}`)}
-                    {@const isCapture = !occ && isCaptureTarget(x, y)}
+
                     {@const isAbilityTgt = selectedCapId != null && abilityTargetMode
                         && (() => {
                             const cap = capById(selectedCapId);
@@ -780,26 +708,26 @@
                     <div
                         class="tile"
                         class:void-tile={!walkable}
+                        class:goal-tile={x === 2 && (y === 0 || y === 4)}
+                        class:energy-tile={y === 2 && (x === 0 || x === 4)}
                         class:deploy-tile={isDeploy && !occ}
                         class:target-move={!!targetInfo && targetInfo.type === 'move'}
                         class:target-fight={!!targetInfo && targetInfo.type === 'fight'}
-                        class:target-capture={isCapture}
                         class:target-ability={isAbilityTgt}
                         class:drag-over={dragOver}
                         class:drag-ok={dragOver && drag?.valid}
                         class:drag-bad={dragOver && drag != null && !drag.valid}
                         data-cell="{x},{y}"
                     >
-                        {#if isDeploy && !occ}
-                            <div class="deploy-marker">↓</div>
+                        {#if x === 2 && (y === 0 || y === 4)}
+                            <div class="goal-marker">{y === 0 ? 'P1' : 'P2'} base</div>
+                        {:else if y === 2 && (x === 0 || x === 4)}
+                            <div class="deploy-marker">⚡</div>
                         {:else if !walkable}
                             <div class="void-marker">·</div>
                         {/if}
                         {#if targetInfo && targetInfo.type === 'fight'}
                             <div class="fight-badge">⚔ {targetInfo.dmg}</div>
-                        {/if}
-                        {#if isCapture}
-                            <div class="capture-badge">⛓</div>
                         {/if}
                         {#if dragOver}
                             <div class="drag-ring"></div>
@@ -813,15 +741,14 @@
                         {#if c.x !== null && c.y !== null}
                             {@const isDragging = drag?.capId === c.id}
                             <div
-                                class="piece p{c.owner === game.player1 ? '1' : '2'}"
-                                class:tower={c.capType === 0}
+                                class="piece p{c.playerSlot + 1}"
                                 class:selected={selectedCapId === c.id}
                                 class:drag-origin={isDragging}
                                 class:my-piece={isMyCap(c)}
                                 style="left:{pct(c.x, activeLayout.width)};top:{pct(c.y, activeLayout.height)}"
                             >
                                 <div class="piece-body">
-                                    <div class="type">{c.capType === 0 ? '★' : c.capType}</div>
+                                    <div class="type">{c.capType}</div>
                                     <div class="hp">{c.health}</div>
                                     {#if c.shield > 0}<div class="shield-badge">🛡{c.shield}</div>{/if}
                                     {#if c.stunnedTurns > 0}<div class="stun-badge">💫</div>{/if}
@@ -829,9 +756,6 @@
                                         <div class="passive-badge">✦</div>
                                     {/if}
                                 </div>
-                                {#if isCaptureTarget(c.x, c.y)}
-                                    <div class="cap-mark">⛓</div>
-                                {/if}
                             </div>
                         {/if}
                     {/each}
@@ -843,12 +767,11 @@
                 {@const dc = capById(drag.capId)}
                 {#if dc}
                     <div
-                        class="drag-ghost p{dc.owner === game.player1 ? '1' : '2'}"
-                        class:tower={dc.capType === 0}
+                        class="drag-ghost p{dc.playerSlot + 1}"
                         style="left:{drag.px}px;top:{drag.py}px"
                     >
                         <div class="piece-body">
-                            <div class="type">{dc.capType === 0 ? '★' : dc.capType}</div>
+                            <div class="type">{dc.capType}</div>
                             <div class="hp">{dc.health}</div>
                         </div>
                         {#if drag.label}
@@ -869,17 +792,15 @@
             {:else if selectedCapId != null}
                 <p class="hint">Tap or drag a highlighted tile — ⚔ means attack</p>
                 {@const selDef = capDefFor(capById(selectedCapId)!)}
-                {#if selDef && selDef.abilityCost > 0 && selDef.abilityTarget !== 0}
+                {#if selDef && selDef.abilityTarget !== 0}
                     <button
                         class="ability-btn"
                         onclick={abilityTargetModeStart}
-                        disabled={!game || game.energy < selDef.abilityCost}
+                        disabled={!game || remainingEnergy < selDef.abilityCost || preview?.usedAbilities.has(selectedCapId) || capById(selectedCapId)?.x === null}
                     >
                         ✨ Ability (⚡{selDef.abilityCost})
                     </button>
                 {/if}
-            {:else if captureTargets.length > 0 && isMyTurn()}
-                <p class="hint">⛓ A surrounded enemy can be captured — tap it</p>
             {/if}
 
             <!-- Selected piece info panel -->
@@ -889,7 +810,7 @@
                     <div class="piece-info">
                         <div class="pi-name">{selDef.name}</div>
                         <div class="pi-stats">❤{selDef.maxHealth} ⚔{selDef.attack} ⚡{selDef.abilityCost}</div>
-                        {#if selDef.abilityDescription !== 'None' && selDef.abilityCost > 0}
+                        {#if selDef.abilityDescription !== 'None' && selDef.abilityTarget !== 0}
                             <div class="pi-ability">
                                 <span class="pi-cost">⚡{selDef.abilityCost}</span>
                                 {selDef.abilityDescription}
@@ -902,40 +823,49 @@
                 {/if}
             {/if}
 
+            {#if opponentHand}
+                <div class="locked-note">P{opponentHand.playerSlot + 1} public hand:
+                    {opponentHand.window.map(id => { const c = game!.caps.find(c => c.id === id); return c ? capDefFor(c)?.name ?? `Piece ${c.capType}` : ''; }).join(' · ') || 'Empty'}
+                </div>
+            {/if}
             <!-- Bench -->
             {#if lockedBenchCount() > 0}
                 <div class="locked-note">
-                    🔒 {lockedBenchCount()} piece{lockedBenchCount() === 1 ? '' : 's'} cycling back into your hand…
+                    🔒 {lockedBenchCount()} piece{lockedBenchCount() === 1 ? '' : 's'} waiting in the draw queue or cooling down.
                 </div>
             {/if}
             {#if myBenchCaps().length > 0}
                 <div class="bench">
-                    <span class="bench-label">Bench ({game.turnCount % 2 === 0 ? 'P1' : 'P2'})</span>
+                    <span class="bench-label">Hand ({game.turnCount % 2 === 0 ? 'P1' : 'P2'})</span>
                     <div class="bench-pieces">
                         {#each myBenchCaps() as c (c.id)}
                             <button
                                 class="bench-piece"
                                 data-bench={c.id}
-                            >{c.capType === 0 ? '★' : c.capType} · {c.health}hp</button>
+                            >{capDefFor(c)?.name ?? c.capType} · {c.health}hp</button>
                         {/each}
                     </div>
                 </div>
             {/if}
 
+            {#each benchCaps().filter(c => c.playerSlot === game!.turnCount % 2 && c.availableTurn > game!.turnCount) as c}
+                <p class="hint">{capDefFor(c)?.name ?? c.capType}: capture cooldown — {Math.ceil((c.availableTurn - (game.turnCount + (game.turnCount % 2 === c.playerSlot ? 0 : 1))) / 2)} owner turns remaining</p>
+            {/each}
+
             <!-- Queued Actions -->
             {#if queuedActions.length > 0}
                 <div class="queued">
                     {#each queuedActions as qa, i}
-                        <button class="queued-action" onclick={() => removeQueuedAction(i)}>
-                            {qa.kind === 'ClaimCapture' ? '⛓' : qa.kind} ({qa.x},{qa.y}) ✕
+                        <button class="queued-action" disabled={committing || busy !== null} onclick={() => removeQueuedAction(i)}>
+                            {qa.kind} ({qa.x},{qa.y}) ✕
                         </button>
                     {/each}
                 </div>
             {/if}
 
             <!-- Commit -->
-            <button class="commit" onclick={commitTurn} disabled={queuedActions.length === 0 || committing || busy !== null}>
-                {committing || busy ? (committing ? 'Submitting…' : busy) : `Submit Turn (${queuedActions.length})`}
+            <button class="commit" onclick={commitTurn} disabled={game.over || !isMyTurn() || committing || busy !== null}>
+                {committing || busy ? (committing ? 'Submitting…' : busy) : (queuedActions.length ? `Submit Turn (${queuedActions.length})` : 'Pass turn')}
             </button>
         </section>
     {/if}
@@ -1046,6 +976,10 @@
         touch-action: manipulation;
     }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible {
+        outline: 2px solid #38bdf8;
+        outline-offset: 2px;
+    }
     button.primary { background: #2563eb; }
     button.big { padding: 1rem; font-size: 1.05rem; }
 
@@ -1196,7 +1130,6 @@
     }
     .piece.p1 .piece-body { background: #2563eb; }
     .piece.p2 .piece-body { background: #dc2626; }
-    .piece.tower .piece-body { border-radius: 8px 8px 16px 16px; }
     .piece.selected .piece-body { outline: 3px solid #38bdf8; outline-offset: 1px; }
     .piece.drag-origin { opacity: 0.35; transform: translate(-50%, -50%) scale(0.85); }
     .piece:not(.my-piece) .piece-body { opacity: 0.92; }
@@ -1232,7 +1165,6 @@
         font-size: 0.72rem;
         margin-right: 0.3rem;
     }
-    .pi-target { color: #64748b; font-size: 0.75rem; }
     .pi-passive {
         color: #a78bfa;
         font-size: 0.8rem;
@@ -1318,7 +1250,6 @@
     }
     .drag-ghost.p1 .piece-body { background: #2563eb; }
     .drag-ghost.p2 .piece-body { background: #dc2626; }
-    .drag-ghost.tower .piece-body { border-radius: 8px 8px 16px 16px; }
     .drag-label {
         position: absolute;
         top: -1.5em;
@@ -1343,7 +1274,7 @@
         padding: 0.5rem 0.8rem;
         font-size: 0.85rem;
     }
-    
+
     /* Queued */
     .queued { display: flex; gap: 0.4rem; flex-wrap: wrap; }
     .queued-action {
@@ -1435,9 +1366,31 @@
         font-size: 0.72rem;
         background: #1e293b;
     }
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .tile.goal-tile { border: 2px solid #60a5fa; }
+    .tile.energy-tile { background: #443815; }
+    .goal-marker { position: absolute; bottom: 2px; font-size: 0.55rem; color: #93c5fd; }
 
     /* Small phone tweaks */
     @media (max-width: 380px) {
         .bench-piece { padding: 0.4rem 0.6rem; font-size: 0.78rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
     }
 </style>

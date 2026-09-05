@@ -16,12 +16,12 @@
 
     // Demo pieces positioned on valid track spots
     let demoPieces = $derived<ScenePiece[]>([
-        { x: layout.p1Deploy[0], y: layout.p1Deploy[1], color: '#3b82f6', isTower: true },
-        { x: 0, y: 0, color: '#3b82f6', isTower: false },
-        { x: 4, y: 0, color: '#3b82f6', isTower: false },
-        { x: layout.p2Deploy[0], y: layout.p2Deploy[1], color: '#ef4444', isTower: true },
-        { x: 0, y: 4, color: '#ef4444', isTower: false },
-        { x: 4, y: 4, color: '#ef4444', isTower: false },
+        { x: layout.p1Deploy[0], y: layout.p1Deploy[1], color: '#3b82f6' },
+        { x: 0, y: 0, color: '#3b82f6' },
+        { x: 4, y: 0, color: '#3b82f6' },
+        { x: layout.p2Deploy[0], y: layout.p2Deploy[1], color: '#ef4444' },
+        { x: 0, y: 4, color: '#ef4444' },
+        { x: 4, y: 4, color: '#ef4444' },
     ]);
 </script>
 

@@ -1,70 +1,41 @@
+use caps::models::cap::{Cap, Location};
 use caps::models::game::Hand;
-
-/// Hand semantics (public + deterministic, no randomness):
-/// - hand_size pieces visible at once (4 by default)
-/// - the cursor points at the oldest hand position
-/// - playing a piece advances the cursor, wrapping around the roster
-/// - the window is positional: the 4 roster slots after the cursor
-/// - a piece already on the board or dead still occupies its window slot
-///   (it just can't be deployed again); the window does not refill —
-///   you wait for the cycle to come back around
-///
-/// The hand is PUBLIC: both players see both hands. No randomness.
 
 pub const HAND_SIZE: u8 = 4;
 
-/// Is this cap in the hand window right now? (Positional check — the
-/// caller separately verifies the cap is on bench before allowing Play.)
-pub fn is_in_hand(hand: @Hand, cap_id: u64) -> bool {
-    let len: u8 = hand.roster.len().try_into().unwrap_or(0);
-    if len == 0 {
-        return false;
+/// Skip board, dead and cooling pieces, rather than blocking the draw queue.
+pub fn window_ids(hand: @Hand, caps: @Array<Cap>, turn_count: u64) -> Array<u64> {
+    let mut out = array![];
+    for id in hand.roster.span() {
+        for c in caps.span() {
+            if c.id == id
+                && *c.location == Location::Bench
+                && *c.available_turn <= turn_count
+                && out.len() < (*hand.hand_size).into() {
+                out.append(*id);
+            }
+        };
     }
-    let cursor: u8 = *hand.cursor;
-    let hand_size: u8 = *hand.hand_size;
-    let mut i: usize = 0;
-    while i < hand.roster.len() {
-        if *hand.roster.at(i) == cap_id {
-            let pos: u8 = i.try_into().unwrap();
-            // wrapping distance from cursor
-            let dist = if pos >= cursor {
-                pos - cursor
-            } else {
-                len - cursor + pos
-            };
-            return dist < hand_size;
+    out
+}
+
+pub fn is_in_hand(hand: @Hand, caps: @Array<Cap>, turn_count: u64, cap_id: u64) -> bool {
+    let ids = window_ids(hand, caps, turn_count);
+    for id in ids.span() {
+        if *id == cap_id {
+            return true;
         }
-        i += 1;
-    };
+    }
     false
 }
 
-/// Advance the cursor by one roster position (wraps). Called after a
-/// successful Play so the next piece cycles in.
-pub fn advance_cursor(ref hand: Hand) {
-    let len: u8 = hand.roster.len().try_into().unwrap_or(0);
-    if len == 0 {
-        return;
+pub fn requeue(ref hand: Hand, cap_id: u64) {
+    let mut roster = array![];
+    for id in hand.roster.span() {
+        if *id != cap_id {
+            roster.append(*id);
+        }
     }
-    let cur: u8 = hand.cursor;
-    hand.cursor = (cur + 1) % len;
-}
-
-/// The cap ids currently visible in the hand window (positional). Used by
-/// the client via get_hand.
-pub fn window_ids(hand: @Hand) -> Array<u64> {
-    let mut out = ArrayTrait::new();
-    let len: u8 = hand.roster.len().try_into().unwrap_or(0);
-    let cursor: u8 = *hand.cursor;
-    let hand_size: u8 = *hand.hand_size;
-    if len == 0 {
-        return out;
-    }
-    let mut k: u8 = 0;
-    while k < hand_size {
-        let idx: usize = ((cursor + k) % len).into();
-        out.append(*hand.roster.at(idx));
-        k += 1;
-    };
-    out
+    roster.append(cap_id);
+    hand.roster = roster;
 }

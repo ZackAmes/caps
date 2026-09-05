@@ -1,3 +1,4 @@
+import { decodeGame, decodeHand, decodeCapType } from './decode';
 import { RpcProvider, CallData, Account, constants } from "starknet";
 import type { AccountInterface } from "starknet";
 import Controller from "@cartridge/controller";
@@ -23,7 +24,7 @@ const devMode = true;
 const policies: SessionPolicies = {
   contracts: {
     [ACTIONS]: {
-      description: "CAPS — deploy caps, move, attack, and capture",
+      description: "CAPS — deploy pieces, move, and activate abilities",
       methods: [
         { name: "Create Game", entrypoint: "create_game" },
         { name: "Create Game with Layout", entrypoint: "create_game_with_layout" },
@@ -35,13 +36,6 @@ const policies: SessionPolicies = {
       ],
     },
   },
-};
-
-export const CAP_STATS: Record<number, [number, number, number, number]> = {
-  0: [12, 2, 1, 1],
-  1: [8, 2, 1, 1],
-  2: [8, 3, 1, 2],
-  3: [6, 3, 2, 1],
 };
 
 // Layout types
@@ -133,6 +127,7 @@ export function isValidStep(layoutId: number, from: [number, number], to: [numbe
 export interface ChainCap {
   id: number;
   owner: string;
+  playerSlot: number;
   capType: number;
   setId: number;
   x: number | null;
@@ -140,6 +135,8 @@ export interface ChainCap {
   health: number;
   shield: number;
   stunnedTurns: number;
+  availableTurn: number;
+  dead: boolean;
 }
 
 export interface ChainGame {
@@ -151,6 +148,9 @@ export interface ChainGame {
   turnCount: number;
   over: boolean;
   winner: string;
+  winnerSlot: number;
+  p1Energy: number;
+  p2Energy: number;
   energy: number;
   effectIds: number[];
   caps: ChainCap[];
@@ -161,7 +161,6 @@ export interface ChainHand {
   gameId: number;
   playerSlot: number;
   roster: number[];
-  cursor: number;
   handSize: number;
   /** Cap ids currently visible in the window (server-computed). */
   window: number[];
@@ -177,30 +176,7 @@ export async function getHand(
     entrypoint: "get_hand",
     calldata: CallData.compile([gameId, playerSlot]),
   });
-  const f: string[] = raw as unknown as string[];
-  if (!f || f.length === 0) return null;
-
-  let i = 0;
-  const option = num(f[i++]);
-  if (option !== 0) return null;
-
-  const hand: ChainHand = {
-    gameId: num(f[i++]),
-    playerSlot: num(f[i++]),
-    roster: [],
-    cursor: 0,
-    handSize: 0,
-    window: [],
-  };
-  // roster: Array<u64>
-  const rosterLen = num(f[i++]);
-  for (let k = 0; k < rosterLen; k++) hand.roster.push(num(f[i++]));
-  hand.cursor = num(f[i++]);
-  hand.handSize = num(f[i++]);
-  // window: Span<u64>
-  const windowLen = num(f[i++]);
-  for (let k = 0; k < windowLen; k++) hand.window.push(num(f[i++]));
-  return hand;
+  return decodeHand(raw as unknown as string[]);
 }
 
 /** An active effect on the board. */
@@ -277,6 +253,7 @@ export const CONDITION_LABELS: Record<number, string> = {
 /** Human-readable passive description from parsed passive fields. */
 export function passiveLabel(def: CapTypeDef): string {
   const type = def.passiveType;
+  if (type === 6) return `Generates ${def.passiveAmount} energy per owner turn on board`;
   if (type === 0) return '';
   const label = PASSIVE_LABELS[type] ?? 'Unknown';
   const cond = CONDITION_LABELS[def.passiveCondition];
@@ -299,107 +276,7 @@ export async function getCapType(
     entrypoint: "get_cap_data",
     calldata: CallData.compile([gameId, capTypeId]),
   });
-  const f: string[] = raw as unknown as string[];
-  if (!f || f.length === 0) return null;
-
-  let i = 0;
-  const option = num(f[i++]);
-  if (option !== 0) return null;
-
-  const id = num(f[i++]);
-  // ByteArray: [len, chunk0..chunkN, pending_len, pending_data]
-  const baLen = num(f[i++]);
-  let name = "";
-  for (let k = 0; k < baLen; k++) {
-    name += BigInt(f[i++]).toString(16).padStart(64, "0")
-      .replace(/00/g, "");
-  }
-  i++; // pending words len
-  i++; // pending data
-  const description = name; // second ByteArray parsed same way below
-  const baLen2 = num(f[i++]);
-  let desc = "";
-  for (let k = 0; k < baLen2; k++) {
-    desc += BigInt(f[i++]).toString(16).padStart(64, "0").replace(/00/g, "");
-  }
-  i++; // pending words len
-  i++; // pending data
-
-  const maxHealth = num(f[i++]);
-  const attack = num(f[i++]);
-  const moveRange = num(f[i++]);
-  const attackRange = num(f[i++]);
-  const playCost = num(f[i++]);
-  const moveCost = num(f[i++]);
-  const abilityCost = num(f[i++]);
-  // third ByteArray: ability_description
-  const baLen3 = num(f[i++]);
-  let abilityDescription = "";
-  for (let k = 0; k < baLen3; k++) {
-    abilityDescription += BigInt(f[i++]).toString(16).padStart(64, "0")
-      .replace(/00/g, "");
-  }
-  i++;
-  i++;
-  const abilityTarget = num(f[i++]);
-  const rangeLen = num(f[i++]);
-  const abilityRange: Array<[number, number]> = [];
-  for (let k = 0; k < rangeLen; k++) {
-    const rx = num(f[i++]);
-    const ry = num(f[i++]);
-    abilityRange.push([rx, ry]);
-  }
-  // Passive: struct { passive_type: PassiveType }
-  // PassiveType is an enum — parse variant index + payload
-  const passiveVariant = num(f[i++]);
-  let passiveType = 0;
-  let passiveAmount = 0;
-  let passiveCondition = 0;
-  let passiveRadius = 0;
-  let passiveEffectType = 0;
-  if (passiveVariant === 1) {
-    // Aura: SetPassiveAura { effect: EffectType, radius: u8 }
-    passiveType = 1;
-    passiveEffectType = num(f[i++]);
-    passiveRadius = num(f[i++]);
-  } else if (passiveVariant === 2) {
-    // DamageReduction: SetPassiveDamageReduction { amount: u16 }
-    passiveType = 2;
-    passiveAmount = num(f[i++]);
-  } else if (passiveVariant === 3) {
-    // ConditionalAttack: SetPassiveConditionalAttack { amount: u16, condition: Condition }
-    passiveType = 3;
-    passiveAmount = num(f[i++]);
-    passiveCondition = num(f[i++]);
-  } else if (passiveVariant === 4) {
-    // Regeneration: SetPassiveRegeneration { amount: u16 }
-    passiveType = 4;
-    passiveAmount = num(f[i++]);
-  } else if (passiveVariant === 5) {
-    // FreeFirstAttack: unit variant, no payload
-    passiveType = 5;
-  }
-
-  return {
-    id,
-    name,
-    description: desc,
-    maxHealth,
-    attack,
-    moveRange,
-    attackRange,
-    playCost,
-    moveCost,
-    abilityCost,
-    abilityDescription,
-    abilityTarget,
-    abilityRange,
-    passiveType,
-    passiveAmount,
-    passiveCondition,
-    passiveRadius,
-    passiveEffectType,
-  };
+  return decodeCapType(raw as unknown as string[]);
 }
 
 export function isDevMode(): boolean {
@@ -476,7 +353,20 @@ async function executeAndWait(call: {
   return res.transaction_hash;
 }
 
+let rulesVerified = false;
+async function requireCurrentRules(): Promise<void> {
+  if (rulesVerified) return;
+  try {
+    const version = await provider.callContract({ contractAddress: ACTIONS, entrypoint: 'rules_version', calldata: [] });
+    if (Number(version[0]) !== 2) throw new Error('Old rules');
+    rulesVerified = true;
+  } catch {
+    throw new Error('This deployment does not support the new rules yet. Deploy the updated CAPS contracts and sync the client manifest before playing.');
+  }
+}
+
 export async function createGame(p2: string, layout: number = LAYOUT_PERIMETER_5X5): Promise<number> {
+  await requireCurrentRules();
   await executeAndWait({
     contractAddress: ACTIONS,
     entrypoint: "create_game_with_layout",
@@ -486,6 +376,7 @@ export async function createGame(p2: string, layout: number = LAYOUT_PERIMETER_5
 }
 
 export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5): Promise<number> {
+  await requireCurrentRules();
   await executeAndWait({
     contractAddress: ACTIONS,
     entrypoint: "create_solo_game_with_layout",
@@ -494,17 +385,20 @@ export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5): Pro
   return 1;
 }
 
-const ACTION_VARIANT: Record<string, number> = { Play: 0, Move: 1, ClaimCapture: 2 };
-
 export interface TurnAction {
   capId: number;
-  kind: "Play" | "Move" | "ClaimCapture";
+  kind: "Play" | "Move" | "Ability";
   x: number;
   y: number;
 }
 
-/** Check if an enemy cap at (x, y) is fully surrounded on the given layout.
- *  Towers are immune to capture; they must be destroyed. */
+const ACTION_VARIANT: Record<TurnAction["kind"], number> = {
+  Play: 0,
+  Move: 1,
+  Ability: 2,
+};
+
+/** Every walkable neighbor must be occupied by the opposing side. */
 export function isSurroundedIn(
   caps: ChainCap[],
   layoutId: number,
@@ -513,7 +407,7 @@ export function isSurroundedIn(
 ): boolean {
   const layout = getLayout(layoutId);
   const target = caps.find(c => c.x === x && c.y === y);
-  if (!target || target.capType === 0) return false;
+  if (!target) return false;
 
   const neighbors: Array<[number, number]> = [];
   for (let dx = -1; dx <= 1; dx++) {
@@ -533,41 +427,13 @@ export function isSurroundedIn(
   for (const [nx, ny] of neighbors) {
     const blocker = caps.find(c => c.x === nx && c.y === ny);
     if (!blocker) return false; // free escape tile
-    if (blocker.owner === target.owner) return false; // friendly doesn't block
+    if (blocker.playerSlot === target.playerSlot) return false; // friendly doesn't block
   }
   return true;
 }
 
 export function isSurrounded(game: ChainGame, x: number, y: number): boolean {
   return isSurroundedIn(game.caps, game.layout, x, y);
-}
-
-function isSurroundedLegacy(game: ChainGame, x: number, y: number): boolean {
-  const layout = getLayout(game.layout);
-  const target = game.caps.find(c => c.x === x && c.y === y);
-  if (!target || target.capType === 0) return false;
-
-  const neighbors: Array<[number, number]> = [];
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      if (dx === 0 && dy === 0) continue;
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx >= 0 && nx < layout.width && ny >= 0 && ny < layout.height) {
-        if (layout.isWalkable(nx, ny)) {
-          neighbors.push([nx, ny]);
-        }
-      }
-    }
-  }
-  if (neighbors.length === 0) return false;
-
-  for (const [nx, ny] of neighbors) {
-    const blocker = game.caps.find(c => c.x === nx && c.y === ny);
-    if (!blocker) return false; // free escape tile
-    if (blocker.owner === target.owner) return false; // friendly doesn't block
-  }
-  return true;
 }
 
 export async function takeTurn(gameId: number, actions: TurnAction[]): Promise<void> {
@@ -580,11 +446,6 @@ export async function takeTurn(gameId: number, actions: TurnAction[]): Promise<v
     entrypoint: "take_turn",
     calldata: CallData.compile(flat),
   });
-}
-
-function num(v: string): number {
-  const n = Number(v);
-  return typeof n === "number" && !Number.isNaN(n) ? n : 0;
 }
 
 /** In-memory cache of cap type definitions per game (gameId -> typeId -> def). */
@@ -606,64 +467,11 @@ export async function getCapTypeCached(gameId: number, capTypeId: number): Promi
 }
 
 export async function getGame(gameId: number): Promise<ChainGame | null> {
+  await requireCurrentRules();
   const raw = await provider.callContract({
     contractAddress: ACTIONS,
     entrypoint: "get_game",
     calldata: CallData.compile([gameId]),
   });
-  const f: string[] = raw as unknown as string[];
-  if (!f || f.length === 0) return null;
-
-  let i = 0;
-  const option = num(f[i++]);
-  if (option !== 0) return null;
-
-  const game: ChainGame = {
-    id: num(f[i++]),
-    player1: f[i++],
-    player2: f[i++],
-    layout: num(f[i++]),
-    setId: num(f[i++]),
-    turnCount: num(f[i++]),
-    over: num(f[i++]) === 1,
-    winner: f[i++],
-    energy: 0,
-    effectIds: [],
-    caps: [],
-  };
-
-  // caps_ids: Array<u64>
-  const idCount = num(f[i++]);
-  for (let k = 0; k < idCount; k++) i++;
-  // effect_ids: Array<u64>
-  const effectCount = num(f[i++]);
-  for (let k = 0; k < effectCount; k++) {
-    game.effectIds.push(num(f[i++]));
-  }
-  // energy: u8, last_action_timestamp: u64
-  game.energy = num(f[i++]);
-  i++; // timestamp
-
-  const capCount = num(f[i++]);
-  for (let k = 0; k < capCount; k++) {
-    const id = num(f[i++]);
-    const owner = f[i++];
-    const capType = num(f[i++]);
-    const setId = num(f[i++]);
-    const locVariant = num(f[i++]);
-    let x: number | null = null;
-    let y: number | null = null;
-    if (locVariant === 1) {
-      x = num(f[i++]);
-      y = num(f[i++]);
-    }
-    const health = num(f[i++]);
-    const shield = num(f[i++]);
-    const stunnedTurns = num(f[i++]);
-    game.caps.push({
-      id, owner, capType, setId, x, y, health, shield, stunnedTurns,
-    });
-  }
-
-  return game;
+  return decodeGame(raw as unknown as string[]);
 }

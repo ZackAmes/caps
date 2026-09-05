@@ -8,10 +8,7 @@ pub struct Global {
     pub sets_counter: u64,
 }
 
-/// Hand model: a player's available pieces this game. Public and
-/// deterministic — no randomness. The hand is a fixed-size cycle through
-/// the player's roster: play the piece at `cursor`, cursor advances.
-/// Bench pieces NOT in the current hand window cannot be deployed.
+/// Public deterministic draw queue. Eligible bench pieces fill the hand in order.
 #[derive(Drop, Serde, Debug, Clone)]
 #[dojo::model]
 pub struct Hand {
@@ -20,11 +17,9 @@ pub struct Hand {
     /// 0 = player1's hand, 1 = player2's hand.
     #[key]
     pub player_slot: u8,
-    /// Roster cap ids in fixed order (the cycle).
+    /// Queue order. Played/captured pieces move to the back.
     pub roster: Array<u64>,
-    /// Index into roster — the next piece(s) available to deploy.
-    pub cursor: u8,
-    /// How many pieces are "in hand" at once (the visible window).
+    /// Maximum number of eligible bench pieces in hand.
     pub hand_size: u8,
 }
 
@@ -41,11 +36,16 @@ pub struct Game {
     pub turn_count: u64,
     pub over: bool,
     pub winner: felt252,
+    /// 0/1 for a winner, 2 while no side has won.
+    pub winner_slot: u8,
     pub caps_ids: Array<u64>,
     /// Effect ids currently live in this game.
     pub effect_ids: Array<u64>,
-    /// Energy the current turn player has remaining this turn.
+    /// Prepared budget for the current player, including this turn's income.
     pub energy: u8,
+    pub p1_energy: u8,
+    pub p2_energy: u8,
+    pub next_effect_id: u64,
     pub last_action_timestamp: u64,
 }
 
@@ -63,9 +63,6 @@ pub enum ActionType {
     /// Move 1 step. Moving onto an enemy tile attacks it: if it dies the
     /// mover takes the tile, otherwise the mover stays put.
     Move: Vec2,
-    /// Claim a capture: sends a fully-surrounded enemy cap at `Vec2`
-    /// back to bench at full health.
-    ClaimCapture: Vec2,
     /// Activate the acting cap's ability at `Vec2` (validated by the core,
     /// executed by the set contract, ops applied by the core).
     Ability: Vec2,

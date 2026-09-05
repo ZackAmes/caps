@@ -131,6 +131,8 @@ pub enum PassiveType {
     ConditionalAttack: SetPassiveConditionalAttack,
     Regeneration: SetPassiveRegeneration,
     FreeFirstAttack,
+    /// Energy generated at the start of this piece's owner's turn while on board.
+    EnergyGeneration: u8,
 }
 
 #[derive(Copy, Drop, Serde, PartialEq, Debug, Introspect)]

@@ -1,76 +1,24 @@
-![Dojo Starter](./assets/cover.png)
+# CAPS contracts
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/mark-dark.svg">
-  <img alt="Dojo logo" align="right" width="120" src=".github/mark-light.svg">
-</picture>
+Dojo 1.8 / Cairo 2.13.1 contracts for the CAPS tactical board game.
 
-<a href="https://x.com/ohayo_dojo">
-<img src="https://img.shields.io/twitter/follow/dojostarknet?style=social"/>
-</a>
-<a href="https://github.com/dojoengine/dojo/stargazers">
-<img src="https://img.shields.io/github/stars/dojoengine/dojo?style=social"/>
-</a>
+See [current rules](../docs/GAME_DESIGN.md) for gameplay and balance values.
 
-[![discord](https://img.shields.io/badge/join-dojo-green?logo=discord&logoColor=white)](https://discord.com/invite/dojoengine)
-[![Telegram Chat][tg-badge]][tg-url]
+## Validate
 
-[tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fdojoengine
-[tg-url]: https://t.me/dojoengine
+From this directory, using Scarb 2.13.1:
 
-# Dojo Starter: Official Guide
-
-A quickstart guide to help you build and deploy your first Dojo provable game.
-
-Read the full tutorial [here](https://dojoengine.org/tutorial/dojo-starter).
-
-## Running Locally
-
-#### Terminal one (Make sure this is running)
-
-```bash
-# Run Katana
-katana --dev --dev.no-fee
+```sh
+scarb build
+scarb test
 ```
 
-#### Terminal two
+The tests deploy a Dojo test world and exercise the actual actions contract and reference set. They do not submit network transactions or spend Sepolia funds. `test_game.ts` is a separate legacy manual network smoke script.
 
-```bash
-# Build the example
-sozo build
+## Deploying this rules version
 
-# Inspect the world
-sozo inspect
+This is a breaking model/ABI change. Deploy into a fresh world (use a new profile seed), deploy the updated standalone Set Zero contract, register it with the actions contract as set id 0, and copy the resulting world manifest to `client/src/lib/dojo/manifest.json`. The checked-in client manifest targets the v2 world deployed September 5, 2026. Never point the new client at old game state.
 
-# Migrate the example
-sozo migrate
+The existing `scripts/deploy.sh` migrates the selected profile and syncs its manifest; it does not choose a fresh seed or register Set Zero for you. Review the target profile before using it.
 
-# Start Torii
-# Replace <WORLD_ADDRESS> with the address of the deployed world from the previous step
-torii --world <WORLD_ADDRESS> --http.cors_origins "*"
-```
-
-## Docker
-You can start stack using docker compose. [Here are the installation instruction](https://docs.docker.com/engine/install/)
-
-```bash
-docker compose up
-```
-You'll get all services logs in the same terminal instance. Whenever you want to stop just ctrl+c
-
----
-
-## Contribution
-
-1. **Report a Bug**
-
-    - If you think you have encountered a bug, and we should know about it, feel free to report it [here](https://github.com/dojoengine/dojo-starter/issues) and we will take care of it.
-
-2. **Request a Feature**
-
-    - You can also request for a feature [here](https://github.com/dojoengine/dojo-starter/issues), and if it's viable, it will be picked for development.
-
-3. **Create a Pull Request**
-    - It can't get better then this, your pull request will be appreciated by the community.
-
-Happy coding!
+The hardcoded Sepolia test account is intentionally retained for the current development workflow.

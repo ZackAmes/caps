@@ -9,7 +9,7 @@ const actionsContract = (manifest as any).contracts.find((c: any) => c.tag === '
 // Access is authorized with the Cartridge RPC token (sk_...) via ?key=.
 const CARTRIDGE_RPC = 'https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9';
 
-const rpcKey = (import.meta.env as any).CONTROLLER_RPC_KEY as string | undefined;
+const rpcKey = import.meta.env.VITE_CONTROLLER_RPC_KEY;
 const rpcUrl = rpcKey ? `${CARTRIDGE_RPC}?key=${rpcKey}` : CARTRIDGE_RPC;
 
 export const dojoConfig = {

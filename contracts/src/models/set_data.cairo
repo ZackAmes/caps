@@ -1,6 +1,8 @@
-use caps::models::game::Vec2;
-use caps::models::effect::{Condition, Effect, EffectTrait, EffectType, EffectTarget, Passive, PassiveType, Timing};
 use caps::models::cap::{Cap, Location};
+use caps::models::effect::{
+    Condition, Effect, EffectTarget, EffectTrait, EffectType, Passive, PassiveType, Timing,
+};
+use caps::models::game::Vec2;
 
 /// Piece definition. OWNED BY THE SET CONTRACT — this struct is only a
 /// data exchange format between the set contract and the core. Stats are
@@ -11,7 +13,6 @@ pub struct CapType {
     pub id: u16,
     pub name: ByteArray,
     pub description: ByteArray,
-
     // ── core-consumed stats ──
     pub max_health: u16,
     pub attack: u16,
@@ -19,13 +20,12 @@ pub struct CapType {
     pub move_range: u8,
     /// Chebyshev range for contact combat (future: ranged contact).
     pub attack_range: u8,
-    /// Energy to deploy from bench.
+    /// Reserved set metadata. Deployment uses a normal action, never energy.
     pub play_cost: u8,
-    /// Energy per Move action.
+    /// Reserved set metadata. Movement uses an action/bonus move, never energy.
     pub move_cost: u8,
     /// Energy to activate the ability.
     pub ability_cost: u8,
-
     // ── ability metadata (display + targeting) ──
     pub ability_description: ByteArray,
     pub ability_target: TargetType,
@@ -78,6 +78,7 @@ pub struct AbilityContext {
 pub struct ActorInfo {
     pub id: u64,
     pub owner: felt252,
+    pub player_slot: u8,
     pub cap_type: u16,
     pub x: u8,
     pub y: u8,
@@ -89,6 +90,7 @@ pub struct ActorInfo {
 pub struct CapInfo {
     pub id: u64,
     pub owner: felt252,
+    pub player_slot: u8,
     pub cap_type: u16,
     pub x: u8,
     pub y: u8,
@@ -123,6 +125,9 @@ pub enum SetOp {
     Cleanse: SetOpCleanse,
     CleansePositive: SetOpCleansePositive,
     Summon: SetOpSummon,
+    /// Turn-local allowances, granted to the activating player.
+    ExtraMoves: u8,
+    ExtraActions: u8,
 }
 
 // One struct per op. Verbosity is the price of Cairo's enum limitations —
@@ -256,7 +261,7 @@ pub struct DotHit {
 
 #[derive(Copy, Drop, Serde, Debug)]
 pub struct HealHit {
-    pub cap_id: u16,
+    pub cap_id: u64,
     pub amount: u16,
 }
 
@@ -266,11 +271,7 @@ pub impl EffectTicker of EffectTickerTrait {
     /// (with remaining_triggers decremented) plus per-effect outputs.
     /// NOTE: DOT/Heal damage application is done by the CALLER (needs
     /// cap_type lookup for max_health clamping) — we just report amounts.
-    fn tick_effects(
-        effects: @Array<Effect>,
-        timing: Timing,
-        turn_count: u64,
-    ) -> TickResult {
+    fn tick_effects(effects: @Array<Effect>, timing: Timing, turn_count: u64) -> TickResult {
         let mut result = TickResult {
             effects: ArrayTrait::new(),
             extra_energy: 0,
@@ -311,16 +312,12 @@ pub impl EffectTicker of EffectTickerTrait {
                     match e.effect_type {
                         EffectType::DOT(dmg) => {
                             if let EffectTarget::Cap(cap_id) = e.target {
-                                result
-                                    .dot_damage
-                                    .append(DotHit { cap_id, amount: dmg.into() });
+                                result.dot_damage.append(DotHit { cap_id, amount: dmg.into() });
                             }
                         },
                         EffectType::Heal(heal) => {
                             if let EffectTarget::Cap(cap_id) = e.target {
-                                result
-                                    .heal_amounts
-                                    .append(HealHit { cap_id: cap_id.try_into().unwrap_or(0), amount: heal.into() });
+                                result.heal_amounts.append(HealHit { cap_id, amount: heal.into() });
                             }
                         },
                         _ => {},
@@ -333,7 +330,7 @@ pub impl EffectTicker of EffectTickerTrait {
                 },
             }
             i += 1;
-        };
+        }
         result
     }
 }
@@ -357,45 +354,31 @@ pub impl ConditionEval of ConditionEvaluatorTrait {
                 let mut i: usize = 0;
                 while i < caps.len() {
                     let c = *caps.at(i);
-                    if c.id != cap.id && c.owner == cap.owner
-                        && c.location != Location::Dead {
+                    if c.id != cap.id
+                        && c.player_slot == cap.player_slot
+                        && caps::models::cap::is_on_board(@c) {
                         count += 1;
                     }
                     i += 1;
-                };
+                }
                 // +1 to include self
                 count + 1 >= min
             },
             Condition::HasAdjacentAlly => {
-                // Flat u8 offsets (no signed arithmetic — cairo-lang 2.13
-                // salsa panic with i16 loops + enum destructuring)
-                let dxs: Array<u8> = array![1, 0, 255, 255, 1, 255, 1, 0];
-                let dys: Array<u8> = array![0, 1, 1, 255, 255, 0, 1, 1];
                 let pos = match cap.location {
                     Location::Board(p) => p,
                     _ => { return false; },
                 };
                 let mut found = false;
-                let mut k: usize = 0;
-                while k < 8 {
-                    let dx = *dxs.at(k);
-                    let dy = *dys.at(k);
-                    let nx = if dx == 255 { pos.x - 1 } else { pos.x + dx };
-                    let ny = if dy == 255 { pos.y - 1 } else { pos.y + dy };
-                    let mut j: usize = 0;
-                    while j < caps.len() {
-                        let c = *caps.at(j);
-                        if c.id != cap.id && c.owner == cap.owner {
-                            if let Location::Board(v) = c.location {
-                                if v.x == nx && v.y == ny {
-                                    found = true;
-                                }
+                for c in caps.span() {
+                    if *c.id != cap.id && *c.player_slot == cap.player_slot {
+                        if let Location::Board(v) = c.location {
+                            if caps::models::cap::dist(pos, *v) <= 1 {
+                                found = true;
                             }
                         }
-                        j += 1;
-                    };
-                    k += 1;
-                };
+                    }
+                }
                 found
             },
             Condition::EnemyInRange(radius) => {
@@ -407,7 +390,7 @@ pub impl ConditionEval of ConditionEvaluatorTrait {
                 let mut found = false;
                 while i < caps.len() && !found {
                     let c = *caps.at(i);
-                    if c.owner != cap.owner {
+                    if c.player_slot != cap.player_slot {
                         if let Location::Board(v) = c.location {
                             let dx: u32 = if v.x > pos.x {
                                 (v.x - pos.x).into()
@@ -419,14 +402,18 @@ pub impl ConditionEval of ConditionEvaluatorTrait {
                             } else {
                                 (pos.y - v.y).into()
                             };
-                            let d = if dx > dy { dx } else { dy };
+                            let d = if dx > dy {
+                                dx
+                            } else {
+                                dy
+                            };
                             if d <= radius.into() {
                                 found = true;
                             }
                         }
                     }
                     i += 1;
-                };
+                }
                 found
             },
             Condition::HealthBelow(pct) => {
@@ -441,11 +428,11 @@ pub impl ConditionEval of ConditionEvaluatorTrait {
                     Location::Board(p) => p,
                     _ => { return false; },
                 };
-                // On 5x5: P1 (starts bottom y=0) is on enemy half if y >= 3
-                // P2 (starts top y=4) is on enemy half if y <= 1.
-                // We can't tell which player this is without game context,
-                // so v1 uses: y >= 2 (crossed the middle).
-                pos.y >= 2
+                if cap.player_slot == 0 {
+                    pos.y >= 3
+                } else {
+                    pos.y <= 1
+                }
             },
         }
     }
@@ -457,7 +444,11 @@ pub fn apply_damage_reduction(passive: Passive, damage: u16) -> u16 {
     match passive.passive_type {
         PassiveType::DamageReduction(dr) => {
             let amount = dr.amount;
-            if damage > amount { damage - amount } else { 0 }
+            if damage > amount {
+                damage - amount
+            } else {
+                0
+            }
         },
         _ => damage,
     }
@@ -465,9 +456,7 @@ pub fn apply_damage_reduction(passive: Passive, damage: u16) -> u16 {
 
 /// Does a conditional attack bonus apply right now?
 /// Returns the bonus amount (0 if condition unmet).
-pub fn conditional_attack_bonus(
-    passive: Passive, cap: Cap, caps: @Array<Cap>,
-) -> u16 {
+pub fn conditional_attack_bonus(passive: Passive, cap: Cap, caps: @Array<Cap>) -> u16 {
     match passive.passive_type {
         PassiveType::ConditionalAttack(ca) => {
             let amount = ca.amount;
@@ -486,9 +475,7 @@ pub fn conditional_attack_bonus(
 /// ApplyEffect op (the caller feeds it into the op applier).
 #[generate_trait]
 pub impl AuraGen of AuraTrait {
-    fn aura_ops(
-        source: Cap, passive: Passive, caps: @Array<Cap>,
-    ) -> Array<SetOp> {
+    fn aura_ops(source: Cap, passive: Passive, caps: @Array<Cap>) -> Array<SetOp> {
         let mut ops = ArrayTrait::new();
         if let PassiveType::Aura(aura_data) = passive.passive_type {
             let effect = aura_data.effect;
@@ -500,8 +487,9 @@ pub impl AuraGen of AuraTrait {
             let mut i: usize = 0;
             while i < caps.len() {
                 let c = *caps.at(i);
-                if c.id != source.id && c.owner == source.owner
-                    && c.location != Location::Dead {
+                if c.id != source.id
+                    && c.player_slot == source.player_slot
+                    && caps::models::cap::is_on_board(@c) {
                     if let Location::Board(v) = c.location {
                         let dx: u32 = if v.x > pos.x {
                             (v.x - pos.x).into()
@@ -513,17 +501,18 @@ pub impl AuraGen of AuraTrait {
                         } else {
                             (pos.y - v.y).into()
                         };
-                        let d = if dx > dy { dx } else { dy };
+                        let d = if dx > dy {
+                            dx
+                        } else {
+                            dy
+                        };
                         if d <= radius.into() {
-                            ops.append(
-                                SetOp::ApplyEffect(
-                                    SetOpApplyEffect {
-                                        target_cap: c.id,
-                                        effect,
-                                        triggers: 1,
-                                    },
-                                ),
-                            );
+                            ops
+                                .append(
+                                    SetOp::ApplyEffect(
+                                        SetOpApplyEffect { target_cap: c.id, effect, triggers: 1 },
+                                    ),
+                                );
                         }
                     }
                 }

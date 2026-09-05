@@ -1,3 +1,5 @@
+> Historical framework design. For implemented gameplay rules, see [GAME_DESIGN.md](./GAME_DESIGN.md). Tower, manual-capture, movement-cost and old hand references below are superseded. The current core also supports turn-local `ExtraMoves` and `ExtraActions` ops.
+
 # Set Operations (SetOps) — The Ability Vocabulary
 
 This document defines the **op vocabulary** — the complete set of state
