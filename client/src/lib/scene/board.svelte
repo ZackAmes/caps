@@ -1,7 +1,7 @@
 <script lang="ts">
     import { T } from '@threlte/core';
     import Tile from './tile.svelte';
-    import { getLayout, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '$lib/dojo/client';
+    import { getLayout, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '$lib/dojo/board';
 
     interface Props {
         size?: number;

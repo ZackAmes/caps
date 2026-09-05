@@ -1,12 +1,10 @@
 <script lang="ts">
     import { previewTurn } from '$lib/dojo/preview';
-    import {
-        connect, createGame, createSoloGame, takeTurn, getGame,
-        getLayout, isValidStep, LAYOUTS, LAYOUT_PERIMETER_5X5, isDevMode,
-        getHand, getCapTypeCached, passiveLabel,
-        type ChainGame, type ChainCap, type TurnAction, type LayoutConfig,
-        type ChainHand, type CapTypeDef,
-    } from '$lib/dojo/client';
+    import { createGame, createSoloGame, takeTurn, getGame, getHand, getCapTypeCached } from '$lib/dojo/client';
+    import { connect, isDevMode } from '$lib/dojo/account';
+    import { getLayout, isValidStep, LAYOUTS, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '$lib/dojo/board';
+    import { passiveLabel } from '$lib/dojo/labels';
+    import type { ChainGame, ChainCap, TurnAction, ChainHand, CapTypeDef } from '$lib/dojo/types';
 
     let account = $state<string | null>(null);
     let status = $state<string>('Disconnected');
@@ -421,7 +419,7 @@
     // Lobby / connection flows (unchanged behavior)
     async function handleConnect() {
         errorMsg = null;
-        busy = 'Opening Controller…';
+        busy = isDevMode() ? 'Connecting test account…' : 'Opening Controller…';
         log('Connect requested');
         try {
             const acc = await connect();
@@ -445,7 +443,7 @@
         results.forEach((r) => {
             if (r.status === 'fulfilled' && r.value) {
                 const g = r.value;
-                if (g.player1 === account || g.player2 === account) {
+                if (account && (BigInt(g.player1) === BigInt(account) || BigInt(g.player2) === BigInt(account))) {
                     if (best === null || g.id > best) best = g.id;
                 }
             }
@@ -453,52 +451,30 @@
         return best;
     }
 
-    async function handleCreateSolo() {
-        errorMsg = null;
-        if (!account) { errorMsg = 'Connect first'; return; }
-        busy = 'Creating solo game…';
-        log(`Creating solo game (${getLayout(selectedLayout).name})`);
-        try {
-            await createSoloGame(selectedLayout);
-            log('Solo game tx confirmed');
-            busy = 'Finding your game…';
-            const id = await discoverMyGame();
-            if (id == null) {
-                status = 'Game created — enter its id manually to load';
-                log('Could not auto-find game id', 'error');
-                return;
-            }
-            gameIdInput = String(id);
-            await handleLoad();
-        } catch (e: any) {
-            errorMsg = e?.message ?? String(e);
-            log(`Create failed: ${errorMsg}`, 'error');
-        } finally {
-            busy = null;
-        }
+    async function handleCreateSolo() { await createAndLoad(); }
+    async function handleCreate() {
+        const opponentAddress = opponent.trim();
+        if (!opponentAddress) { errorMsg = 'Enter an opponent address'; return; }
+        await createAndLoad(opponentAddress);
     }
 
-    async function handleCreate() {
+    async function createAndLoad(opponentAddress?: string) {
         errorMsg = null;
         if (!account) { errorMsg = 'Connect first'; return; }
-        const opp = opponent.trim();
-        if (!opp) { errorMsg = 'Enter an opponent address'; return; }
         busy = 'Creating game…';
-        log(`Creating game vs ${opp.slice(0, 10)}…`);
         try {
-            await createGame(opp, selectedLayout);
-            log('Game tx confirmed');
+            if (opponentAddress) await createGame(opponentAddress, selectedLayout);
+            else await createSoloGame(selectedLayout);
             busy = 'Finding your game…';
             const id = await discoverMyGame();
-            if (id == null) {
+            if (id === null) {
                 status = 'Game created — enter its id manually to load';
-                log('Could not auto-find game id', 'error');
                 return;
             }
             gameIdInput = String(id);
             await handleLoad();
-        } catch (e: any) {
-            errorMsg = e?.message ?? String(e);
+        } catch (e: unknown) {
+            errorMsg = e instanceof Error ? e.message : String(e);
             log(`Create failed: ${errorMsg}`, 'error');
         } finally {
             busy = null;

@@ -1,4 +1,5 @@
-import type { ChainCap, ChainGame, ChainHand, CapTypeDef, TurnAction, LayoutConfig } from './client';
+import type { LayoutConfig } from './board';
+import type { ChainCap, ChainGame, ChainHand, CapTypeDef, TurnAction } from './types';
 
 export function handIds(roster: number[], caps: ChainCap[], turn: number, size = 4): number[] {
   return roster.filter(id => {

@@ -1,6 +1,8 @@
 import manifest from './manifest.json';
 
-const actionsContract = (manifest as any).contracts.find((c: any) => c.tag === 'caps-actions');
+const actionsContract = manifest.contracts.find((c) => c.tag === 'caps-actions');
+
+if (!actionsContract) throw new Error('Client manifest is missing caps-actions');
 
 // ── Single RPC: Cartridge Starknet Sepolia ──
 // The Controller requires the Cartridge RPC (its session execution posts the
@@ -22,7 +24,7 @@ export const dojoConfig = {
 
     // Contract tags → addresses
     contracts: {
-        actions: (actionsContract?.address ?? '') as string,
+        actions: actionsContract.address,
     },
 } as const;
 

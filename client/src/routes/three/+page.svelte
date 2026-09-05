@@ -9,7 +9,7 @@
         LAYOUT_CROSS_5X5,
         LAYOUTS,
         getLayout,
-    } from '$lib/dojo/client';
+    } from '$lib/dojo/board';
 
     let selectedLayout = $state<number>(LAYOUT_PERIMETER_5X5);
     let layout = $derived(getLayout(selectedLayout));

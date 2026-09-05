@@ -1,4 +1,4 @@
-import type { ChainGame, ChainHand, CapTypeDef } from './client';
+import type { ChainGame, ChainHand, CapTypeDef } from './types';
 const num = (s: string): number => Number(BigInt(s));
 
 export function decodeHand(f: string[]): ChainHand | null {

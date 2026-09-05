@@ -1,38 +1,31 @@
-# sv
+# CAPS client
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
-
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
+Svelte 5 client for CAPS on Starknet Sepolia. See [game rules](../docs/GAME_DESIGN.md).
 
 ```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
+bun install
+bun run dev
+bun run check
+bun test tests
+bun run build
 ```
 
-## Developing
+The hardcoded test account in `src/lib/dojo/account.ts` is intentional while Controller is unavailable on Sepolia. An optional `VITE_CONTROLLER_RPC_KEY` configures browser RPC access.
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+## Code layout
 
-```sh
-npm run dev
+- `dojo/types.ts`: game, piece, hand, ability and action data types.
+- `dojo/board.ts`: track layouts and bounded movement geometry; no wallet or RPC dependency.
+- `dojo/decode.ts`: tested Cairo response decoders.
+- `dojo/preview.ts`: deterministic turn preview for the reference set.
+- `dojo/account.ts`: current test account and retained Controller connection path.
+- `dojo/transport.ts`: shared RPC provider and deployed actions address.
+- `dojo/client.ts`: contract reads, transactions and piece-definition cache.
+- `dojo/labels.ts`: display text for passive abilities.
+- `routes/game/+page.svelte`: interaction state and game UI.
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+The client manifest is synced from the deployed Sepolia world. Pushing `main` triggers the repository's Vercel production deployment.
 
-## Building
+## Remaining cleanup opportunities
 
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+The game page still combines board rendering, pointer interaction and lobby UI. Split those components separately from rule changes. Game discovery still probes the first 40 game ids; replace this with a dedicated creation event or lookup endpoint before the test world grows beyond that range. Preview execution supports the reference set; new sets need a general ability-preview interface.
