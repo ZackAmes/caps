@@ -24,7 +24,7 @@ Its background service needs this host to stay awake and online.
 
 ## Mechanics to exercise
 
-- Follow the visible connections on all five layouts. Each connection costs one step;
+- Follow the visible connections on all six layouts. Each connection costs one step;
   diagonal connections count once, and touching squares without a connection are not adjacent.
 - Reach the middle square of the opponent's back row to win.
 - Surround a piece on every connected neighbor to capture it automatically. Check its
@@ -86,7 +86,7 @@ usable. Tap a hand piece to inspect it without deploying it.
 
 ### Duel Paths and orientation
 
-Start a new game with **7x9 Duel Paths** (the default). Both P1 and P2 should see their
+Start a new game with **7x9 Duel Paths** (the previous default). Both P1 and P2 should see their
 own base nearest the hand; in a bot game it must not rotate when the bot takes its turn.
 Select a hand piece, tap your highlighted base, and submit. On a later turn the edge
 between `(3,0)` and `(3,2)` counts as one step. Row effects can target row 8 (displayed
@@ -105,3 +105,14 @@ Clocks stay visible above the board. The game menu contains sharing, refresh, vi
 settings, match state, and rules. Leaving for the lobby does not pause time. Verify
 portrait mobile, short landscape, and desktop layouts: clocks and the hand should
 stay visible without scrolling the game page. The lobby and menu panels can scroll.
+
+
+### Corrected Duel grid
+
+New matches default to layout 5, **7x5 Duel Grid**. Each back row has seven spots;
+each side has five including corners. The nine inner spots form a 3×3 grid.
+The four corners connect diagonally to the nearest inner corner. Each player's
+right-of-goal spot connects to the middle spot of the nearest inner row; the two
+approaches map onto each other under a 180-degree rotation. Goals connect only
+along the back row. Every drawn edge still costs one step, regardless of its length.
+Older 7x9 games retain layout 4 and their original paths.

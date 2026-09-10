@@ -1,3 +1,4 @@
+use caps::logic::track::{is_valid_step, is_walkable, path_distance};
 use caps::models::cap::{Cap, Location, m_Cap};
 use caps::models::effect::m_Effect;
 use caps::models::game::{Action, ActionType, Game, Hand, Vec2, m_Game, m_Global, m_Hand};
@@ -354,4 +355,47 @@ fn large_map_deployment_steps_and_goal_preserve_old_games() {
     assert!(game.over && game.winner_slot == 0, "large goal");
     let old: Game = world.read_model(old_id);
     assert!(old.layout == 0 && old.turn_count == 0 && !old.over, "old game preserved");
+}
+
+#[test]
+fn duel_grid_connections_and_goal() {
+    let mut count = 0;
+    let mut y = 0;
+    while y < 5 {
+        let mut x = 0;
+        while x < 7 {
+            if is_walkable(5, Vec2 { x, y }) {
+                count += 1;
+            }
+            x += 1;
+        }
+        y += 1;
+    }
+    assert!(count == 29, "twenty outer spots and nine inner spots");
+    assert!(is_valid_step(5, Vec2 { x: 2, y: 0 }, Vec2 { x: 3, y: 1 }), "p1 right approach");
+    assert!(is_valid_step(5, Vec2 { x: 4, y: 4 }, Vec2 { x: 3, y: 3 }), "p2 right approach");
+    assert!(
+        !is_valid_step(5, Vec2 { x: 3, y: 0 }, Vec2 { x: 3, y: 1 }),
+        "goal has no direct inner edge",
+    );
+    assert!(
+        path_distance(5, Vec2 { x: 1, y: 2 }, Vec2 { x: 3, y: 2 }) == Option::Some(1),
+        "inner horizontal edge is one step",
+    );
+    let (mut world, api, _) = setup();
+    let id = api.create_solo_game_with_layout(5);
+    let (game, _) = api.get_game(id).unwrap();
+    let first = *game.caps_ids.at(0);
+    api.take_turn(id, array![act(first, ActionType::Play(Vec2 { x: 3, y: 0 }))]);
+    api.take_turn(id, array![]);
+    api.take_turn(id, array![act(first, ActionType::Move(Vec2 { x: 2, y: 0 }))]);
+    api.take_turn(id, array![]);
+    api.take_turn(id, array![act(first, ActionType::Move(Vec2 { x: 3, y: 1 }))]);
+    let cap: Cap = world.read_model(first);
+    assert!(cap.location == Location::Board(Vec2 { x: 3, y: 1 }), "entered inner grid");
+    api.take_turn(id, array![]);
+    put(ref world, first, 4, 4);
+    api.take_turn(id, array![act(first, ActionType::Move(Vec2 { x: 3, y: 4 }))]);
+    let (game, _) = api.get_game(id).unwrap();
+    assert!(game.over && game.winner_slot == 0, "duel goal win");
 }

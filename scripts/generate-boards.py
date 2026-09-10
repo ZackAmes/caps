@@ -20,7 +20,7 @@ lines += ['pub fn energy_space(layout: u8, pos: Vec2) -> bool {', '    match lay
 for b in boards:
     expr=' || '.join(f'(pos.x == {x} && pos.y == {y})' for x,y in b['energySpaces']) or 'false'
     lines.append(f"        {b['id']} => {expr},")
-lines += ['        _ => false,', '    }', '}', 'pub fn distances(layout: u8, source: u8) -> Array<u8> {', '    match (layout, source) {']
+lines += ['        _ => false,', '    }', '}', 'fn packed_distances(layout: u8, source: u8) -> Array<u128> {', '    // Sixteen byte distances per u128 keep the Sierra class below the size limit.', '    match (layout, source) {']
 for board in boards:
     width,height=board['width'],board['height']
     graph = {p:set(n) for p,n in graphs.get(board.get('extends'),{}).items()}
@@ -43,9 +43,28 @@ for board in boards:
                 if n not in dist: dist[n]=dist[p]+1; queue.append(n)
         assert len(dist)==len(graph), 'Disconnected board'
         values=[dist.get((x,y),255) for y in range(height) for x in range(width)]
-        lines.append(f"        ({board['id']}, {source[1]*width+source[0]}) => array![{', '.join(map(str,values))}],")
-    lines.append(f"        ({board['id']}, _) => array![{', '.join(['255']*(width*height))}],")
-lines+=['        _ => array![],', '    }', '}']
+        packed = [sum(v << (8*i) for i,v in enumerate(values[start:start+16])) for start in range(0,len(values),16)]
+        lines.append(f"        ({board['id']}, {source[1]*width+source[0]}) => array![{', '.join(map(str,packed))}],")
+lines += ['        _ => array![],', '    }', '}',
+    'pub fn distance(layout: u8, source: u8, target: u8) -> u8 {',
+    '    let packed = packed_distances(layout, source);',
+    '    let index: u32 = (target / 16).into();',
+    '    if index >= packed.len() { return 255; }',
+    '    let mut block = *packed.at(index);',
+    '    let mut offset = target % 16;',
+    '    while offset > 0 { block = block / 256; offset -= 1; }',
+    '    (block % 256).try_into().unwrap()', '}',
+    'pub fn distances(layout: u8, source: u8) -> Array<u8> {',
+    '    let mut packed = packed_distances(layout, source);',
+    '    let (width, height) = dimensions(layout);',
+    '    let mut result = array![];', '    let mut index: u8 = 0;', '    let mut block: u128 = 0;',
+    '    while index < width * height {',
+    '        if index % 16 == 0 {',
+    '            block = packed.pop_front().unwrap_or(340282366920938463463374607431768211455);',
+    '        }',
+    '        result.append((block % 256).try_into().unwrap());',
+    '        block = block / 256;', '        index += 1;',
+    '    }', '    result', '}']
 path=root/'contracts/src/logic/board_data.cairo'
 content='\n'.join(lines)+'\n'
 if '--check' in sys.argv:

@@ -11,7 +11,7 @@
     import { previewTurn } from '@caps/game-core/preview';
     import { createGame, createSoloGame, takeTurn, claimTimeout, type TransactionProgress, getGame, getHand, getStack, getCapTypeCached, findLatestGameForPlayer, getGameSnapshot, getClock, getTurnRecord, transactionState } from '$lib/dojo/client';
     import { connect, isDevMode } from '$lib/dojo/account';
-    import { getLayout, goalSlot, isEnergySpace, LAYOUT_DUEL_7X9, pathDistance, LAYOUTS, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '@caps/game-core/board';
+    import { getLayout, goalSlot, isEnergySpace, LAYOUT_DUEL_7X5, pathDistance, LAYOUTS, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '@caps/game-core/board';
     import { describeImpact } from '@caps/game-core/stack';
     import type { AbilityStack, TurnRecord } from '@caps/game-core/types';
     import { passiveActive, passiveBonus } from '@caps/game-core/passives';
@@ -90,7 +90,7 @@
     }
 
     let opponent = $state('');
-    let selectedLayout = $state<number>(LAYOUT_DUEL_7X9);
+    let selectedLayout = $state<number>(LAYOUT_DUEL_7X5);
     let gameIdInput = $state('1');
     let game = $state<ChainGame | null>(null);
 

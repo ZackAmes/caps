@@ -101,3 +101,11 @@ This changes the `CapType` set ABI (`passives` list and scalar path-step ability
 together into a fresh v4 world, register the set, sync the manifest, then switch client
 and bot. Use a separate checkpoint for the v4 bot. Do not upgrade only one contract or
 silently reinterpret ongoing v2 games with the new path connections.
+
+### Compact map tables
+
+`generate-boards.py` packs sixteen byte-sized distances into each Cairo `u128` constant.
+This keeps additional layouts below Starknet's class-size limit while preserving old
+maps. `distance` extracts a single target for range/step checks; `distances` decodes a
+row for neighbor enumeration. The value 255 still means unreachable. Client tests
+compare every packed source/destination value against graph search on every layout.

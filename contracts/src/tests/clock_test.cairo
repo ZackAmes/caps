@@ -1,6 +1,5 @@
 use caps::models::cap::{Cap, Location};
 use caps::models::game::{Action, ActionType, Game, Vec2};
-use caps::models::game_clock::GameClock;
 use caps::systems::actions::IActionsDispatcherTrait;
 use caps::tests::rules_test::{put, setup};
 use dojo::model::{ModelStorage, ModelStorageTest};

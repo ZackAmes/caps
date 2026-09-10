@@ -1,4 +1,4 @@
-use caps::logic::board_data::{dimensions, distances, p1_base, p2_base};
+use caps::logic::board_data::{dimensions, distance, distances, p1_base, p2_base};
 use caps::models::game::Vec2;
 
 pub const LAYOUT_PERIMETER_5X5: u8 = 0;
@@ -6,6 +6,7 @@ pub const LAYOUT_CROSS_5X5: u8 = 1;
 pub const LAYOUT_DIAGONAL_X_5X5: u8 = 2;
 pub const LAYOUT_DIAMOND_5X5: u8 = 3;
 pub const LAYOUT_DUEL_7X9: u8 = 4;
+pub const LAYOUT_DUEL_7X5: u8 = 5;
 pub const MAX_BOARD_SIZE: u8 = 15;
 
 pub fn get_board_dimensions(layout: u8) -> (u8, u8) {
@@ -18,12 +19,11 @@ pub fn path_distance(layout: u8, from: Vec2, to: Vec2) -> Option<u8> {
     if width == 0 || from.x >= width || from.y >= height || to.x >= width || to.y >= height {
         return Option::None;
     }
-    let row = distances(layout, from.y * width + from.x);
-    let distance = *row.at((to.y * width + to.x).into());
-    if distance == 255 {
+    let steps = distance(layout, from.y * width + from.x, to.y * width + to.x);
+    if steps == 255 {
         Option::None
     } else {
-        Option::Some(distance)
+        Option::Some(steps)
     }
 }
 pub fn is_walkable(layout: u8, pos: Vec2) -> bool {

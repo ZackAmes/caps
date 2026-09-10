@@ -107,3 +107,14 @@ the losing slot in `GameClock`; it does not create a fabricated action journal e
 created before v6 receive fresh clocks on their next successful turn. Missing clocks
 cannot be claimed as expired. Completed clocks remain frozen. There is no pause when
 leaving the page, and practice mode has separate clocks for its two sides.
+
+
+## Duel grid (layout 5)
+
+The default board uses a seven-spot back row and five-spot side tracks including
+corners, surrounding a 3×3 inner grid (29 total spots). Corners connect to inner
+corners. The spot to each player's right of their goal connects to the center of
+the nearest inner row, giving 180-degree rotational symmetry. Goals are `(3,0)`
+and `(3,4)`; side energy spaces are `(0,2)` and `(6,2)`. Inner columns are 1, 3, 5:
+the two-coordinate horizontal gap remains a single path step. Layout 4 is preserved
+for existing matches; creating new games defaults to layout 5 in the client.

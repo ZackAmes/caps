@@ -4,6 +4,7 @@ export const LAYOUT_CROSS_5X5 = 1;
 export const LAYOUT_DIAGONAL_X_5X5 = 2;
 export const LAYOUT_DIAMOND_5X5 = 3;
 export const LAYOUT_DUEL_7X9 = 4;
+export const LAYOUT_DUEL_7X5 = 5;
 export type Position = [number, number];
 export interface LayoutConfig {
   id: number; name: string; description: string;

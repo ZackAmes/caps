@@ -68,3 +68,12 @@ test('recognizes both goals on the larger map', () => {
     expect(previewTurn(p.game,p.hand,p.definitions,p.layout,actions,p.stack).winnerSlot).toBe(slot);
   }
 });
+
+test('recognizes goals on the corrected Duel grid for either side', () => {
+  for (const slot of [0,1]) {
+    const p = position([cap(1,slot,1,slot === 0 ? 4 : 2,slot === 0 ? 4 : 0)],slot);
+    p.layout = getLayout(5); p.game.layout = 5;
+    const actions = greedyStrategy.chooseTurn(p);
+    expect(actions).toEqual([{capId:1,kind:'Move',x:3,y:slot === 0 ? 4 : 0}]);
+  }
+});
