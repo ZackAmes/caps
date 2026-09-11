@@ -109,3 +109,21 @@ This keeps additional layouts below Starknet's class-size limit while preserving
 maps. `distance` extracts a single target for range/step checks; `distances` decodes a
 row for neighbor enumeration. The value 255 still means unreachable. Client tests
 compare every packed source/destination value against graph search on every layout.
+
+### Connector squares and Duel Ring
+
+Layout 6 is the new default: 28 playable spots with an evenly spaced eight-spot
+inner ring and no center. Older layouts keep their existing rules.
+
+Boards may define `connections` alongside legacy `paths`:
+
+```json
+{"from":[1,2],"to":[3,2],"via":[[2,2]]}
+```
+
+This connects the two endpoint spots in one movement step. `via` contains visual
+connector squares, which may bend the path through several squares; pieces cannot
+stop on them. Rendering uses every segment, while movement, range, surround capture,
+and the bot use only the endpoint connection. A connector cannot overlap a playable
+spot. Moving a connector changes the appearance without changing path distance.
+The same definition generates contract distances and client/bot adjacency.

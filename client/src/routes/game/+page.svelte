@@ -6,12 +6,12 @@
     import { actionLabel, square } from '$lib/game/history';
     import { onMount } from 'svelte';
     import { dojoConfig } from '$lib/dojo/config';
-    import { viewerSlot, pathEdges, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
+    import { viewerSlot, pathEdges, connectorSquares, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
     import botAccount from '../../../../bot/account.public.json';
     import { previewTurn } from '@caps/game-core/preview';
     import { createGame, createSoloGame, takeTurn, claimTimeout, type TransactionProgress, getGame, getHand, getStack, getCapTypeCached, findLatestGameForPlayer, getGameSnapshot, getClock, getTurnRecord, transactionState } from '$lib/dojo/client';
     import { connect, isDevMode } from '$lib/dojo/account';
-    import { getLayout, goalSlot, isEnergySpace, LAYOUT_DUEL_7X5, pathDistance, LAYOUTS, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '@caps/game-core/board';
+    import { getLayout, goalSlot, isEnergySpace, LAYOUT_DUEL_RING, pathDistance, LAYOUTS, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '@caps/game-core/board';
     import { describeImpact } from '@caps/game-core/stack';
     import type { AbilityStack, TurnRecord } from '@caps/game-core/types';
     import { passiveActive, passiveBonus } from '@caps/game-core/passives';
@@ -90,7 +90,7 @@
     }
 
     let opponent = $state('');
-    let selectedLayout = $state<number>(LAYOUT_DUEL_7X5);
+    let selectedLayout = $state<number>(LAYOUT_DUEL_RING);
     let gameIdInput = $state('1');
     let game = $state<ChainGame | null>(null);
 
@@ -167,6 +167,7 @@
 
     let otherHand = $derived(game && mySlot === game.turnCount % 2 ? opponentHand : hand);
     let activeLayout = $derived<LayoutConfig>(getLayout(game ? game.layout : selectedLayout));
+    let connectorCells = $derived(connectorSquares(activeLayout));
     let isSolo = $derived<boolean>(!!game && game.player1 === game.player2);
 
     let preview = $derived(game ? previewTurn(game, hand, capDefMap, activeLayout, queuedActions, pendingStack) : null);
@@ -768,7 +769,7 @@
                 {:else}
             <!-- Board: static tiles + gliding pieces layer -->
             <div
-                class="board" class:flipped={mySlot === 0}
+                class="board" class:routed={!!activeLayout.connections?.length} class:flipped={mySlot === 0}
                 role="application"
                 aria-label="Game board"
                 style="--w:{activeLayout.width};--h:{activeLayout.height}"
@@ -798,6 +799,7 @@
                     <div
                         class="tile"
                         class:void-tile={!walkable}
+                        class:connector-tile={connectorCells.has(`${x},${y}`)}
                         class:goal-tile={goalSlot(activeLayout,x,y) !== null}
                         class:energy-tile={isEnergySpace(activeLayout,x,y)}
                         class:deploy-tile={isDeploy && !occ}
@@ -817,7 +819,7 @@
                             <div class="goal-marker">P{goalSlot(activeLayout,x,y)! + 1} base</div>
                         {:else if isEnergySpace(activeLayout,x,y)}
                             <div class="deploy-marker">⚡</div>
-                        {:else if !walkable}
+                        {:else if !walkable && !activeLayout.connections?.length}
                             <div class="void-marker">·</div>
                         {/if}
                         {#if targetInfo && targetInfo.type === 'fight'}
@@ -1568,4 +1570,6 @@
     .leave-game { margin-top:8px; background:transparent; border:1px solid #4a627c; }
     .timeout-result { padding:12px; border-radius:12px; background:#19394b; }
     @media(min-width:700px) { .lobby { padding-top:32px; padding-bottom:40px; } .topbar { width:100%; max-width:960px; align-self:center; } }
+    .board.routed .tile.void-tile { visibility:hidden; }
+    .board.routed .tile.connector-tile { visibility:visible; opacity:1; background:#26374e; border:0; border-radius:2px; }
 </style>

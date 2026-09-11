@@ -9,15 +9,23 @@ export function viewerSlot(game: ChainGame, account: string | null): number | nu
     return BigInt(account) === BigInt(game.player2) ? 1 : null;
 }
 
-/** Draw exactly the same edges used by movement and range. */
+/** Render a movement edge through optional connector squares; bends are not extra steps. */
 export function pathEdges(layout: LayoutConfig) {
     const edges: { x1: number; y1: number; x2: number; y2: number }[] = [];
+    const routes = new Map((layout.connections ?? []).map(c => [[c.from.join(','),c.to.join(',')].sort().join(':'),c]));
     for (let y = 0; y < layout.height; y++) for (let x = 0; x < layout.width; x++) {
         for (const [nx, ny] of layout.neighbors([x, y])) {
-            if (y * layout.width + x < ny * layout.width + nx) edges.push({ x1: x, y1: y, x2: nx, y2: ny });
+            if (y * layout.width + x >= ny * layout.width + nx) continue;
+            const route = routes.get([[x,y].join(','),[nx,ny].join(',')].sort().join(':'));
+            const points = route ? [route.from,...route.via,route.to] : [[x,y],[nx,ny]];
+            for (let i=1;i<points.length;i++) edges.push({x1:points[i-1][0],y1:points[i-1][1],x2:points[i][0],y2:points[i][1]});
         }
     }
     return edges;
+}
+
+export function connectorSquares(layout: LayoutConfig): Set<string> {
+    return new Set((layout.connections ?? []).flatMap(c => c.via.map(p => p.join(','))));
 }
 
 export function effectTiming(entry: StackEntry, stack: AbilityStack, turn: number, slot: number | null): string {

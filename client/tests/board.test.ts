@@ -62,3 +62,24 @@ test('packed contract tables agree with client graph distances for every source 
     }
   }
 });
+
+test('Duel Ring connector squares route one-step edges without becoming playable spots', async () => {
+  const { pathDistance, createLayout } = await import('@caps/game-core/board');
+  const { pathEdges } = await import('../src/lib/game/presentation');
+  const ring = LAYOUTS[6];
+  let count = 0;
+  for(let y=0;y<ring.height;y++)for(let x=0;x<ring.width;x++)if(ring.isWalkable(x,y))count++;
+  assert.equal(count,28);
+  assert.equal(ring.isWalkable(3,4),false);
+  for(const route of ring.connections!) {
+    assert.equal(pathDistance(ring,route.from,route.to),1);
+    for(const [x,y] of route.via) assert.equal(ring.isWalkable(x,y),false);
+    assert.equal(pathDistance(ring,[6-route.from[0],8-route.from[1]],[6-route.to[0],8-route.to[1]]),1);
+  }
+  const config={id:99,name:'Bent',description:'',width:5,height:5,p1Deploy:[0,0] as [number,number],p2Deploy:[4,4] as [number,number],connections:[{from:[0,0] as [number,number],to:[4,4] as [number,number],via:[[0,2],[4,2]] as [number,number][]}]};
+  const bent=createLayout(config,[]);
+  assert.equal(pathDistance(bent,[0,0],[4,4]),1);
+  assert.equal(pathEdges(bent).length,3);
+  assert.equal(bent.isWalkable(0,2),false);
+  assert.throws(()=>createLayout(config,[[[0,2]]]),/Connector cannot occupy/);
+});

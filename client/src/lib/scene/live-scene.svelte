@@ -3,7 +3,7 @@
     import LivePiece from './live-piece.svelte';
     import { T } from '@threlte/core';
     import { HTML, interactivity, type EventMap } from '@threlte/extras';
-    import { pathEdges, boardPosition } from '$lib/game/presentation';
+    import { pathEdges, boardPosition, connectorSquares } from '$lib/game/presentation';
     import { goalSlot, isEnergySpace, pathDistance, type LayoutConfig } from '@caps/game-core/board';
     import type { AbilityStack, ChainCap, CapTypeDef } from '@caps/game-core/types';
 
@@ -14,6 +14,7 @@
     } = $props();
     interactivity();
     let tiles = $derived(Array.from({length: layout.width * layout.height}, (_, i) => ({x: i % layout.width, y: Math.floor(i / layout.width)})));
+    let connectors = $derived(connectorSquares(layout));
     const wx = (x: number) => boardPosition(layout,x,0,viewer)[0] - (layout.width - 1) / 2;
     const wz = (y: number) => boardPosition(layout,0,y,viewer)[1] - (layout.height - 1) / 2;
     function danger(x: number, y: number) {
@@ -45,11 +46,14 @@
     {@const goal = goalSlot(layout,tile.x,tile.y)}
     {@const energy = isEnergySpace(layout,tile.x,tile.y)}
     {@const threatened = walkable && danger(tile.x, tile.y)}
+    {@const connector = connectors.has(`${tile.x},${tile.y}`)}
+    {#if walkable || !layout.connections?.length || connector}
     <T.Mesh position={[wx(tile.x), walkable ? 0 : -0.09, wz(tile.y)]}>
         <T.BoxGeometry args={[0.91, walkable ? 0.16 : 0.025, 0.91]} />
-        <T.MeshStandardMaterial color={target ? colors[target] : focusedCells.has(`${tile.x},${tile.y}`) ? '#7651ae' : goal !== null ? goal === 0 ? '#244b83' : '#783446' : energy ? '#78612c' : walkable ? '#33455f' : '#172338'}
+        <T.MeshStandardMaterial color={target ? colors[target] : focusedCells.has(`${tile.x},${tile.y}`) ? '#7651ae' : goal !== null ? goal === 0 ? '#244b83' : '#783446' : energy ? '#78612c' : walkable ? '#33455f' : connector ? '#26374e' : '#172338'}
             emissive={threatened ? '#e98a19' : target ? colors[target] : '#000000'} emissiveIntensity={threatened ? 0.35 : 0.12} roughness={0.7} />
     </T.Mesh>
+    {/if}
     {#if walkable && (goal !== null || energy)}
         <HTML position={[wx(tile.x), 0.12, wz(tile.y) + 0.32]} center pointerEvents="none" zIndexRange={[8, 1]}>
             <span class="tile-label">{goal !== null ? `P${goal + 1} ◇` : '⚡'}</span>
