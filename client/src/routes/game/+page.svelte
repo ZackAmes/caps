@@ -1,12 +1,13 @@
 <script lang="ts">
     import { clockRemaining, clockLabel, type GameClock } from '@caps/game-core/clock';
+    import { boardArt, artPosition } from '$lib/game/board-art';
     import { submissionHasLanded } from '$lib/game/sync';
     import StackPanel from '$lib/game/StackPanel.svelte';
     import TurnHistory from '$lib/game/TurnHistory.svelte';
     import { actionLabel, square } from '$lib/game/history';
     import { onMount } from 'svelte';
     import { dojoConfig } from '$lib/dojo/config';
-    import { viewerSlot, pathEdges, connectorSquares, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
+    import { viewerSlot, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
     import botAccount from '../../../../bot/account.public.json';
     import { previewTurn } from '@caps/game-core/preview';
     import { createGame, createSoloGame, takeTurn, claimTimeout, type TransactionProgress, getGame, getHand, getStack, getCapTypeCached, findLatestGameForPlayer, getGameSnapshot, getClock, getTurnRecord, transactionState } from '$lib/dojo/client';
@@ -167,7 +168,7 @@
 
     let otherHand = $derived(game && mySlot === game.turnCount % 2 ? opponentHand : hand);
     let activeLayout = $derived<LayoutConfig>(getLayout(game ? game.layout : selectedLayout));
-    let connectorCells = $derived(connectorSquares(activeLayout));
+    let art = $derived(boardArt(activeLayout));
     let isSolo = $derived<boolean>(!!game && game.player1 === game.player2);
 
     let preview = $derived(game ? previewTurn(game, hand, capDefMap, activeLayout, queuedActions, pendingStack) : null);
@@ -695,9 +696,6 @@
         queuedActions = queuedActions.slice(0, index);
     }
 
-    function pct(pos: number, size: number): string {
-        return `${((pos + 0.5) / size) * 100}%`;
-    }
 
 </script>
 
@@ -769,20 +767,20 @@
                 {:else}
             <!-- Board: static tiles + gliding pieces layer -->
             <div
-                class="board" class:routed={!!activeLayout.connections?.length} class:flipped={mySlot === 0}
+                class="board stylized" class:flipped={mySlot === 0}
                 role="application"
                 aria-label="Game board"
-                style="--w:{activeLayout.width};--h:{activeLayout.height}"
+                style="--w:{art.width};--h:{art.height}"
                 onpointerdown={onPointerDown}
                 onpointermove={onPointerMove}
                 onpointerup={onPointerUp}
                 onpointercancel={onPointerCancel}
                 onlostpointercapture={onPointerCancel}
             >
-                {#each Array.from({ length: activeLayout.height * activeLayout.width }, (_, idx) => idx) as idx}
-                    {@const x = idx % activeLayout.width}
-                    {@const y = Math.floor(idx / activeLayout.width)}
-                    {@const walkable = activeLayout.isWalkable(x, y)}
+                {#each art.spots as spot (`${spot.x},${spot.y}`)}
+                    {@const x = spot.x}
+                    {@const y = spot.y}
+                    {@const walkable = true}
                     {@const isDeploy = isDeploySpot(x, y)}
                     {@const occ = capAt(x, y)}
                     {@const selCap = capById(drag?.capId ?? selectedCapId ?? -1)}
@@ -799,8 +797,9 @@
                     <div
                         class="tile"
                         class:void-tile={!walkable}
-                        class:connector-tile={connectorCells.has(`${x},${y}`)}
+                        style="left:{(spot.px/art.width+0.5)*100}%;top:{(spot.py/art.height+0.5)*100}%;width:{0.78/art.width*100}%;height:{0.78/art.height*100}%"
                         class:goal-tile={goalSlot(activeLayout,x,y) !== null}
+                        class:p2-goal={goalSlot(activeLayout,x,y) === 1}
                         class:energy-tile={isEnergySpace(activeLayout,x,y)}
                         class:deploy-tile={isDeploy && !occ}
                         class:effect-focus={focusedCells.has(`${x},${y}`)}
@@ -814,9 +813,9 @@
                         title={square(x,y)}
                         data-cell="{x},{y}"
                     >
-                        {#if walkable}<span class="coordinate">{square(x,y)}</span>{/if}
+
                         {#if goalSlot(activeLayout,x,y) !== null}
-                            <div class="goal-marker">P{goalSlot(activeLayout,x,y)! + 1} base</div>
+                            <div class="goal-marker">◇</div>
                         {:else if isEnergySpace(activeLayout,x,y)}
                             <div class="deploy-marker">⚡</div>
                         {:else if !walkable && !activeLayout.connections?.length}
@@ -832,8 +831,8 @@
                 {/each}
 
                 <svg class="paths" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    {#each pathEdges(activeLayout) as edge}
-                        <line x1={(edge.x1 + 0.5) / activeLayout.width * 100} y1={(edge.y1 + 0.5) / activeLayout.height * 100} x2={(edge.x2 + 0.5) / activeLayout.width * 100} y2={(edge.y2 + 0.5) / activeLayout.height * 100} />
+                    {#each art.segments as edge}
+                        <line x1={(edge.from[0]/art.width+0.5)*100} y1={(edge.from[1]/art.height+0.5)*100} x2={(edge.to[0]/art.width+0.5)*100} y2={(edge.to[1]/art.height+0.5)*100} />
                     {/each}
                 </svg>
                 <!-- Pieces: absolutely positioned, glide between tiles -->
@@ -846,7 +845,7 @@
                                 class:selected={selectedCapId === c.id}
                                 class:drag-origin={isDragging}
                                 class:my-piece={isMyCap(c)}
-                                style="left:{pct(c.x, activeLayout.width)};top:{pct(c.y, activeLayout.height)}"
+                                style="left:{(artPosition(art,c.x,c.y)[0]/art.width+0.5)*100}%;top:{(artPosition(art,c.x,c.y)[1]/art.height+0.5)*100}%"
                             >
                                 <div class="piece-body">
                                     <div class="type" title={capDefFor(c)?.name}>{(capDefFor(c)?.name ?? String(c.capType)).slice(0, 3)}</div>
@@ -1570,6 +1569,11 @@
     .leave-game { margin-top:8px; background:transparent; border:1px solid #4a627c; }
     .timeout-result { padding:12px; border-radius:12px; background:#19394b; }
     @media(min-width:700px) { .lobby { padding-top:32px; padding-bottom:40px; } .topbar { width:100%; max-width:960px; align-self:center; } }
-    .board.routed .tile.void-tile { visibility:hidden; }
-    .board.routed .tile.connector-tile { visibility:visible; opacity:1; background:#26374e; border:0; border-radius:2px; }
+    .board.stylized { display:block; padding:0; border-radius:28px; background:radial-gradient(ellipse at center,#182f3e,#0c1927); }
+    .board.stylized .tile { position:absolute; transform:translate(-50%,-50%); border-radius:50%; border:2px solid #7899ad; background:#203444; z-index:3; }
+    .board.stylized.flipped .tile { transform:translate(-50%,-50%) rotate(180deg); }
+    .board.stylized .paths,.board.stylized .pieces-layer { inset:0; width:100%; height:100%; }
+    .board.stylized .tile.goal-tile { border-color:#90bbf2; } .board.stylized .tile.energy-tile { border-color:#e7c57b; }
+    .board.stylized .goal-marker { font-size:22px; position:static; }
+    .board.stylized .tile.p2-goal { border-color:#ff8798; }
 </style>

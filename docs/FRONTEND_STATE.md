@@ -94,3 +94,13 @@ estimate; the contract determines expiry at transaction execution. Timeout claim
 use the same pending/confirmation/state-refresh flow as turns and an expected-turn
 guard. A timeout advances `turn_count` and sets `GameClock.timed_out_slot`, so the
 result UI and history distinguish it from a goal win without inventing a turn record.
+
+## Board artwork
+
+`client/src/lib/game/board-art.ts` owns visual spot positions and path segments.
+Duel Ring uses free-positioned circular nodes, a square inner ring, and direct
+corner strokes. Logical connector squares remain in the rules but are not rendered
+as tiles or mandatory bends. Changing artwork does not change path distances or
+canonical action/ability coordinates. Both 2D and Three.js use the same artwork;
+3D picking finds the rendered node and returns its logical coordinates rather than
+rounding the pointer to a grid square. Grid labels and empty grid tiles are hidden.
