@@ -2,6 +2,7 @@ import { decodeBoard } from '@caps/game-core/published-board';
 import { decodeClock, clockRemaining } from '@caps/game-core/clock';
 import { CallData, type Account, type RpcProvider } from 'starknet';
 import { decodeGame, decodeHand, decodeCapType, decodeStack } from '@caps/game-core/decode';
+import { beginMoveIntent } from '@caps/game-core/move-intent';
 import { encodeActions } from '@caps/game-core/encode';
 import { getLayout, type LayoutConfig } from '@caps/game-core/board';
 import type { ChainGame, ChainHand, CapTypeDef, TurnAction, AbilityStack } from '@caps/game-core/types';
@@ -19,7 +20,8 @@ export interface PositionV7 {
 export class CapsV7Adapter implements GameAdapter<ChainGame, PositionV7, TurnAction> {
   private boards = new Map<string, LayoutConfig>();
   private definitions = new Map<string, CapTypeDef>();
-  constructor(private provider: RpcProvider, private account: Account, private actionsAddress: string, private boardsAddress: string) {}
+  private pendingIntents = new Map<string, ReturnType<typeof beginMoveIntent>>();
+  constructor(private provider: RpcProvider, private account: Account, private actionsAddress: string, private boardsAddress: string, private toriiUrl = '', private worldAddress = '0x0') {}
 
   private call(entrypoint: string, calldata: (string | number)[] = []) {
     return this.provider.callContract({ contractAddress: this.actionsAddress, entrypoint, calldata: CallData.compile(calldata) });
@@ -71,12 +73,19 @@ export class CapsV7Adapter implements GameAdapter<ChainGame, PositionV7, TurnAct
   }
 
   async sendTurn(game: GameInfo<ChainGame>, actions: TurnAction[]): Promise<string> {
-    const response = await this.account.execute({
-      contractAddress: this.actionsAddress,
-      entrypoint: 'take_turn_if_current',
-      calldata: CallData.compile([game.id, game.turn, ...encodeActions(actions)]),
-    }, { tip: 0 });
-    return response.transaction_hash;
+    const intent = beginMoveIntent(this.toriiUrl, this.worldAddress, this.account, game.id, game.turn, actions,
+      error => console.warn('Move preview unavailable', String(error)));
+    try {
+      const response = await this.account.execute({
+        contractAddress: this.actionsAddress,
+        entrypoint: 'take_turn_if_current',
+        calldata: CallData.compile([game.id, game.turn, ...encodeActions(actions)]),
+      }, { tip: 0 });
+      intent.broadcast(response.transaction_hash);
+      if (this.pendingIntents.size >= 256) this.pendingIntents.delete(this.pendingIntents.keys().next().value!);
+      this.pendingIntents.set(response.transaction_hash, intent);
+      return response.transaction_hash;
+    } catch (error) { intent.cancel(); throw error; }
   }
 
   async claimTimeout(game: GameInfo<ChainGame>): Promise<string | null> {
@@ -93,8 +102,13 @@ export class CapsV7Adapter implements GameAdapter<ChainGame, PositionV7, TurnAct
   async transactionStatus(hash: string): Promise<'pending' | 'succeeded' | 'reverted'> {
     try {
       const receipt = await this.provider.getTransactionReceipt(hash);
-      if (receipt.isReverted()) return 'reverted';
-      if (receipt.isSuccess() && ['ACCEPTED_ON_L2', 'ACCEPTED_ON_L1'].includes(receipt.finality_status)) return 'succeeded';
+      if (receipt.isReverted()) {
+        this.pendingIntents.get(hash)?.cancel(hash); this.pendingIntents.delete(hash);
+        return 'reverted';
+      }
+      if (receipt.isSuccess() && ['ACCEPTED_ON_L2', 'ACCEPTED_ON_L1'].includes(receipt.finality_status)) {
+        this.pendingIntents.delete(hash); return 'succeeded';
+      }
       return 'pending';
     } catch (error) {
       // A just-broadcast hash may not have propagated; other RPC failures must surface.

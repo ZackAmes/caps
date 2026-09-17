@@ -34,7 +34,7 @@
   "contracts": [
     {
       "address": "0x6f466df359053acd6186676c69a10b13b360d35b78b5982c64506921946973",
-      "class_hash": "0xe0f4c10fb2f5e8d8be818f1e0f36e0d83e8ddef2eb7d6627dcf42f87863dc3",
+      "class_hash": "0x7b2d85155beb75f7e18ac31e981bcac388c46500060442271f8cfd31e930229",
       "init_calldata": [],
       "tag": "caps-actions",
       "selector": "0x482dc9f44e8c68f3ef3ab58497e0d8e446ad2581a5544512fbaebef3af3ccbc",
@@ -436,6 +436,53 @@
     {
       "members": [
         {
+          "name": "identity",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "key": true
+        },
+        {
+          "name": "game_id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "turn",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "world",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "key": false
+        },
+        {
+          "name": "timestamp",
+          "type": "core::integer::u64",
+          "key": false
+        },
+        {
+          "name": "tx_hash",
+          "type": "core::felt252",
+          "key": false
+        },
+        {
+          "name": "status",
+          "type": "core::integer::u8",
+          "key": false
+        },
+        {
+          "name": "actions",
+          "type": "core::array::Array::<core::felt252>",
+          "key": false
+        }
+      ],
+      "class_hash": "0x475f8181da6ef18756dda2eb1d8a377fa18b7a1d2a3ca7652c9ab6c301989fa",
+      "tag": "caps-MoveIntent",
+      "selector": "0x164315681810a22e2bb31814aa60bdccf807914113dc5096983df5bb2d5f18f"
+    },
+    {
+      "members": [
+        {
           "name": "id",
           "type": "core::integer::u64",
           "key": true
@@ -555,7 +602,30 @@
       "selector": "0x5b1094a1b78af3afe75fb3b37ccf996a3e3d3dc3cc6c3fb9c15067daa5d3a8e"
     }
   ],
-  "events": [],
+  "events": [
+    {
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "turn",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "intent",
+          "type": "caps::models::move_intent::MoveIntent",
+          "key": false
+        }
+      ],
+      "class_hash": "0x1c8e79356c44b9428747fbce8f9c642e9748ce444dcf3b6030dbe299eb62d0e",
+      "tag": "caps-MoveCommitted",
+      "selector": "0x39388d7b48a023a418093f660ff176973c122804b05e38f199852571476ee72"
+    }
+  ],
   "external_contracts": [],
   "abis": [
     {
@@ -1553,6 +1623,110 @@
     {
       "type": "event",
       "name": "caps::models::game_clock::m_GameClock::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::move_intent::MoveCommitted",
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "turn",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "intent",
+          "type": "caps::models::move_intent::MoveIntent"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::move_intent::MoveCommittedValue",
+      "members": [
+        {
+          "name": "intent",
+          "type": "caps::models::move_intent::MoveIntent"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::move_intent::MoveIntent",
+      "members": [
+        {
+          "name": "identity",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "game_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "turn",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "world",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "timestamp",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "tx_hash",
+          "type": "core::felt252"
+        },
+        {
+          "name": "status",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "actions",
+          "type": "core::array::Array::<core::felt252>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::move_intent::MoveIntentValue",
+      "members": [
+        {
+          "name": "world",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "timestamp",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "tx_hash",
+          "type": "core::felt252"
+        },
+        {
+          "name": "status",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "actions",
+          "type": "core::array::Array::<core::felt252>"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "caps::models::move_intent::e_MoveCommitted::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "caps::models::move_intent::m_MoveIntent::Event",
       "kind": "enum",
       "variants": []
     },
@@ -3389,6 +3563,41 @@
       "items": []
     },
     {
+      "type": "struct",
+      "name": "dojo::event::event::EventDef",
+      "members": [
+        {
+          "name": "name",
+          "type": "core::byte_array::ByteArray"
+        },
+        {
+          "name": "layout",
+          "type": "dojo::meta::layout::Layout"
+        },
+        {
+          "name": "schema",
+          "type": "dojo::meta::introspect::Struct"
+        }
+      ]
+    },
+    {
+      "type": "interface",
+      "name": "dojo::event::interface::IEvent",
+      "items": [
+        {
+          "type": "function",
+          "name": "definition",
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "dojo::event::event::EventDef"
+            }
+          ],
+          "state_mutability": "view"
+        }
+      ]
+    },
+    {
       "type": "interface",
       "name": "dojo::meta::interface::IDeployedResource",
       "items": [
@@ -4962,8 +5171,8 @@
       "name": "ensure_abi",
       "inputs": [
         {
-          "name": "model",
-          "type": "caps::models::turn_record::TurnRecord"
+          "name": "event",
+          "type": "caps::models::move_intent::MoveCommitted"
         }
       ],
       "outputs": [],
@@ -4982,7 +5191,7 @@
       "inputs": [
         {
           "name": "value",
-          "type": "caps::models::turn_record::TurnRecordValue"
+          "type": "caps::models::move_intent::MoveCommittedValue"
         }
       ],
       "outputs": [],

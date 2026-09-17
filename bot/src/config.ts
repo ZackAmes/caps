@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 export interface BotConfig {
   rpcUrl: string;
   toriiUrl: string;
+  worldAddress: string;
   address: string;
   privateKey: string;
   actionsAddress: string;
@@ -26,6 +27,7 @@ export function loadConfig(env = process.env): BotConfig {
   if (!Number.isFinite(pollMs) || pollMs < 1000) throw new Error('BOT_POLL_MS must be at least 1000');
   const config = {
     toriiUrl: env.BOT_TORII_URL ?? '',
+    worldAddress: manifest.world.address,
     rpcUrl: required('BOT_RPC_URL'), address: required('BOT_ADDRESS'), privateKey: required('BOT_PRIVATE_KEY'),
     actionsAddress, boardsAddress: env.BOT_BOARDS_ADDRESS ?? manifest.contracts.find((c:{tag:string})=>c.tag === "caps-boards")?.address ?? "", pollMs, statePath: env.BOT_STATE_PATH ?? resolve(import.meta.dir, '../state/checkpoint.json'),
   };

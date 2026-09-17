@@ -19,7 +19,7 @@ async function main() {
   const chainId = await provider.getChainId();
   if (chainId !== constants.StarknetChainId.SN_SEPOLIA) throw new Error('This bot is configured for Sepolia only');
   const account = new Account({ provider, address: config.address, signer: config.privateKey });
-  const adapter = new CapsV7Adapter(provider, account, config.actionsAddress, config.boardsAddress);
+  const adapter = new CapsV7Adapter(provider, account, config.actionsAddress, config.boardsAddress, config.toriiUrl, config.worldAddress);
   await adapter.checkCompatibility();
   const identity = `${chainId}:${BigInt(config.actionsAddress)}:${BigInt(config.address)}:rules7`;
   const store = new FileStore(config.statePath);

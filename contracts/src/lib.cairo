@@ -4,6 +4,7 @@ pub mod systems {
 }
 
 pub mod models {
+    pub mod move_intent;
     pub mod board;
     pub mod cap;
     pub mod effect;

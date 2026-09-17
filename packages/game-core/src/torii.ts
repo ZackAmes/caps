@@ -10,11 +10,14 @@ export type IndexerStatus = 'connecting' | 'live' | 'offline';
 export interface WatchOptions {
   gameId?: number;
   onGame: (game: GameUpdate) => void;
+  onIntent?: (model: Record<string, unknown>) => void;
   onStatus?: (status: IndexerStatus) => void;
 }
-const query = `subscription {
+const query = (intents: boolean) => `subscription {
   entityUpdated {
-    models { ... on caps_Game { id turn_count over player1 player2 } }
+    models { ... on caps_Game { id turn_count over player1 player2 }
+      ${intents ? "... on caps_MoveIntent { identity game_id turn world timestamp tx_hash status actions }" : ""}
+    }
   }
 }`;
 
@@ -47,7 +50,7 @@ export function watchGames(endpoint: string, options: WatchOptions): () => void 
         const message = JSON.parse(String(event.data));
         if (message.type === 'connection_ack') {
           acknowledged = true; seen.clear();
-          ws.send(JSON.stringify({ id: 'games', type: 'subscribe', payload: { query } }));
+          ws.send(JSON.stringify({ id: 'games', type: 'subscribe', payload: { query: query(!!options.onIntent) } }));
           report('live');
         } else if (message.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', payload: message.payload }));
@@ -58,6 +61,7 @@ export function watchGames(endpoint: string, options: WatchOptions): () => void 
         } else if (message.type === 'next') {
           retryMs = 1000;
           for (const model of message.payload?.data?.entityUpdated?.models ?? []) {
+            if (model.identity && (options.gameId === undefined || Number(model.game_id) === options.gameId)) options.onIntent?.(model);
             const id = Number(model.id), turn = Number(model.turn_count);
             if (!Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(turn) || turn < 0 ||
                 typeof model.over !== 'boolean' || ![model.player1, model.player2].every(p => typeof p === 'string' && /^0x[0-9a-f]+$/i.test(p))) continue;

@@ -13,6 +13,7 @@
     "./stack": "./src/stack.ts",
     "./clock": "./src/clock.ts",
     "./published-board": "./src/published-board.ts",
-    "./torii": "./src/torii.ts"
+    "./torii": "./src/torii.ts",
+    "./move-intent": "./src/move-intent.ts"
   }
 }

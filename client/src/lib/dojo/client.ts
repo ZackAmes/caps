@@ -1,5 +1,6 @@
 import { decodeClock } from '@caps/game-core/clock';
 import { consistentSnapshot } from '../game/sync';
+import { beginMoveIntent } from '@caps/game-core/move-intent';
 import { encodeActions } from '@caps/game-core/encode';
 import { CallData, type Call } from 'starknet';
 import { decodeGame, decodeHand, decodeCapType, decodeStack, decodeTurnRecord } from '@caps/game-core/decode';
@@ -91,11 +92,24 @@ export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5, boar
 }
 
 export async function takeTurn(gameId: number, expectedTurn: number, actions: TurnAction[], progress?: TransactionProgress): Promise<void> {
-  await executeAndWait({
-    contractAddress: ACTIONS,
-    entrypoint: 'take_turn_if_current',
-    calldata: CallData.compile([gameId, expectedTurn, ...encodeActions(actions)]),
-  }, progress);
+  const intent = beginMoveIntent(dojoConfig.toriiUrl, dojoConfig.worldAddress, getAccount(), gameId, expectedTurn, actions,
+    error => console.warn('Move preview unavailable', error));
+  let hash: string | undefined;
+  try {
+    await executeAndWait({
+      contractAddress: ACTIONS,
+      entrypoint: 'take_turn_if_current',
+      calldata: CallData.compile([gameId, expectedTurn, ...encodeActions(actions)]),
+    }, (stage, txHash) => {
+      hash = txHash;
+      if (stage === 'confirming') intent.broadcast(txHash);
+      progress?.(stage, txHash);
+    });
+  } catch (error) {
+    // Unknown receipt/network failures can still land; those hints expire naturally.
+    if (!hash || (error instanceof Error && error.message === 'Transaction reverted')) intent.cancel(hash);
+    throw error;
+  }
 }
 
 export async function getGameCount(): Promise<number> {

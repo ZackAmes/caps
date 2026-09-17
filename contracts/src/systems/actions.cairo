@@ -122,6 +122,8 @@ pub mod actions {
     use caps::models::turn_record::{TurnRecord, snapshot};
     use core::num::traits::{SaturatingAdd, Zero};
     use dojo::model::ModelStorage;
+    use dojo::event::EventStorage;
+    use caps::models::move_intent::{MoveIntent, MoveCommitted};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use super::{
         IActions, LAYOUT_PERIMETER_5X5, _effect_snapshots, get_p1_deploy_spot, get_p2_deploy_spot,
@@ -638,6 +640,18 @@ pub mod actions {
             self._save_effects(ref game, effects);
             game.last_action_timestamp = get_block_timestamp();
             world.write_model(@game);
+            let mut encoded_actions = array![];
+            turn.serialize(ref encoded_actions);
+            world.emit_event(@MoveCommitted {
+                game_id, turn: completed_turn,
+                intent: MoveIntent {
+                    identity: get_caller_address(), game_id, turn: completed_turn,
+                    world: world.dispatcher.contract_address,
+                    timestamp: now * 1000,
+                    tx_hash: starknet::get_tx_info().unbox().transaction_hash,
+                    status: 3, actions: encoded_actions,
+                },
+            });
             world
                 .write_model(
                     @TurnRecord {

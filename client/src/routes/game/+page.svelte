@@ -10,6 +10,7 @@
     import { viewerSlot, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
     import botAccount from '../../../../bot/account.public.json';
     import { previewTurn } from '@caps/game-core/preview';
+    import { readMoveIntent, INTENT_LIFETIME_MS, type MoveIntent } from '@caps/game-core/move-intent';
     import { watchGames, type IndexerStatus } from '@caps/game-core/torii';
     import defaultBoard from '$lib/dojo/default-board.json';
     import { getPublishedBoard } from '$lib/dojo/client';
@@ -131,6 +132,7 @@
     let pendingSubmission = $state<{gameId:number; turn:number; hash:string; confirmed:boolean} | null>(null);
     let syncStage = $state<'idle'|'submitting'|'confirming'|'syncing'>('idle');
     let syncError = $state<string | null>(null);
+    let incomingIntent = $state<MoveIntent | null>(null);
     let indexerStatus = $state<IndexerStatus>('offline');
     let lastSynced = $state<string>('');
     let loadEpoch = 0, submissionEpoch = 0, historyEpoch = 0;
@@ -186,10 +188,24 @@
 
     let preview = $derived(game ? previewTurn(game, hand, capDefMap, activeLayout, queuedActions, pendingStack) : null);
     let remainingEnergy = $derived(preview?.energy ?? 0);
-    let simCaps = $derived(preview?.caps ?? []);
+    let activeIncoming = $derived.by(() => {
+        // The regular clock tick also expires unconfirmed hints, even while RPC is offline.
+        void clockTick;
+        const intent = incomingIntent;
+        if (!intent || intent.status === 2 || !game || game.over || isMyTurn() || intent.gameId !== game.id ||
+            intent.turn !== game.turnCount || Date.now() - intent.timestamp > INTENT_LIFETIME_MS) return null;
+        return intent;
+    });
+    let remotePreview = $derived.by(() => {
+        if (!activeIncoming || !game) return null;
+        try { return previewTurn(game, hand, capDefMap, activeLayout, activeIncoming.actions, pendingStack); }
+        catch { return null; }
+    });
+    let displayedStack = $derived(remotePreview?.stack ?? preview?.stack ?? pendingStack);
+    let simCaps = $derived(remotePreview?.caps ?? preview?.caps ?? []);
     let canActivateSelected = $derived(!!selectedActor && canAct() && isMyCap(selectedActor) && selectedActor.x !== null && !selectedActor.stunnedTurns && !preview?.usedAbilities.has(selectedActor.id) && remainingEnergy >= (capDefFor(selectedActor)?.abilityCost ?? Infinity));
 
-    let focusedCells = $derived(impactFootprint(preview?.stack.entries.find(e => e.id === focusedEffectId), simCaps, activeLayout));
+    let focusedCells = $derived(impactFootprint(displayedStack.entries.find(e => e.id === focusedEffectId), simCaps, activeLayout));
     let latestOpponent = $derived(historyRecords.find(r => isSolo || r.playerSlot !== mySlot));
     let sceneTargets = $derived.by(() => {
         const cap = capById(drag?.capId ?? selectedCapId ?? -1);
@@ -618,6 +634,7 @@
                 syncStage = pendingForGame.confirmed ? 'syncing' : 'confirming';
                 return false;
             }
+            if (incomingIntent && (incomingIntent.gameId !== nextGame.id || incomingIntent.turn !== nextGame.turnCount || nextGame.over)) incomingIntent = null;
             onPointerCancel();
             queuedActions = []; selectedCapId = null; hoveredCapId = null; abilityTargetMode = false; stackTargetMode = false;
             capDefMap = snapshot.definitions; pendingStack = snapshot.stack;
@@ -661,6 +678,13 @@
             if (checking || !current() || committing || busy) return;
             checking = true;
             try {
+                const remote = incomingIntent;
+                if (remote && remote.status === 1 && remote.txHash !== '0x0' && Date.now() - remote.timestamp <= INTENT_LIFETIME_MS) {
+                    // A bad hint or slow receipt must never hold up authoritative reads.
+                    void deadline(transactionState(remote.txHash), 5000).then(receipt => {
+                        if (current() && receipt === 'reverted' && incomingIntent?.timestamp === remote.timestamp) incomingIntent = {...remote, status:2};
+                    }).catch(() => {});
+                }
                 const pending = pendingSubmission?.gameId === id ? pendingSubmission : null;
                 if (pending) {
                     const receipt = await deadline(transactionState(pending.hash));
@@ -696,6 +720,13 @@
             onGame: next => {
                 if (!current() || (next.turn <= (game?.turnCount ?? -1) && next.over === game?.over)) return;
                 hintedTurn = Math.max(hintedTurn, next.turn); hintRetries = 0; scheduleCheck();
+            },
+            onIntent: model => {
+                if (!current() || !game || isMyTurn()) return;
+                const intent = readMoveIntent(model, dojoConfig.worldAddress, game);
+                if (!intent || (incomingIntent?.gameId === intent.gameId && incomingIntent.turn === intent.turn && incomingIntent.timestamp >= intent.timestamp)) return;
+                incomingIntent = intent;
+                if (intent.status === 1) scheduleCheck();
             },
             onStatus: next => { indexerStatus = next; if (next === 'live') scheduleCheck(); },
         });
@@ -779,9 +810,9 @@
         <section class="play-screen" aria-label="CAPS game">
             <div class="play-top"><header class="play-hud">
                 <button aria-label="Game menu" onclick={() => overlay = 'menu'}>☰</button>
-                <span title={frozenClock ? "Clock display paused while confirming; chain time is authoritative" : ""} class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
+                <span title={frozenClock ? "Clock display paused while confirming; chain time is authoritative" : ""} class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : remotePreview ? 'Move pending' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
                 <span class="hud-energy" title="Your energy">⚡ {isMyTurn() ? remainingEnergy : mySlot === 0 ? game.p1Energy : game.p2Energy}</span>
-                <button class:has-effects={!!preview?.stack.entries.length} aria-label={`Ability stack: ${preview?.stack.entries.length ?? 0} effects`} onclick={() => overlay = 'stack'}>◷ {preview?.stack.entries.length ?? 0}</button>
+                <button class:has-effects={!!displayedStack.entries.length} aria-label={`Ability stack: ${displayedStack.entries.length} effects`} onclick={() => overlay = 'stack'}>◷ {displayedStack.entries.length}</button>
                 <button aria-label="Opponent moves and turn history" onclick={() => overlay = 'history'}>↶</button>
             </header>
             <div class="clock-strip" aria-label={frozenClock ? "Game clocks paused on screen while confirming" : "Game clocks: two minutes plus ten seconds per turn"}>
@@ -796,7 +827,7 @@
                 {#if boardMode === '3d'}
                     <svelte:boundary onerror={fallbackBoard}>
                         {#if ThreeBoard}
-                            <ThreeBoard viewer={mySlot} layout={activeLayout} caps={simCaps} definitions={capDefMap} selectedId={drag?.capId ?? selectedCapId} targets={sceneTargets} {focusedCells} stack={preview?.stack ?? pendingStack} onpickready={(pick) => boardPicker = pick} onpointerdown={onPointerDown} onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel} onhover={(id) => { if (!drag) hoveredCapId = id; }} onfailure={fallbackBoard} />
+                            <ThreeBoard viewer={mySlot} layout={activeLayout} caps={simCaps} definitions={capDefMap} selectedId={drag?.capId ?? selectedCapId} targets={sceneTargets} {focusedCells} stack={displayedStack} onpickready={(pick) => boardPicker = pick} onpointerdown={onPointerDown} onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel} onhover={(id) => { if (!drag) hoveredCapId = id; }} onfailure={fallbackBoard} />
                         {:else}<p class="stage-notice" role="status">Loading board…</p>{/if}
                     </svelte:boundary>
                 {:else}
@@ -936,7 +967,7 @@
                 <div class="turn-controls">
                     <button aria-label="Undo last planned action" disabled={!canAct() || !queuedActions.length} onclick={() => removeQueuedAction(queuedActions.length - 1)}>↶</button>
                     <span class="action-dots" aria-label={`${preview?.actions ?? 1} normal actions and ${preview?.moves ?? 0} bonus moves remaining`}>{(preview?.actions ?? 1) ? '●' : '○'}{(preview?.moves ?? 0) > 0 ? ` +${preview?.moves}` : ''}</span>
-                    <button class="submit-turn" onclick={() => commitTurn(canClaimTimeout)} disabled={!canAct() && !canClaimTimeout}>{syncStage === 'submitting' ? 'Sending…' : syncStage === 'confirming' ? 'Confirming…' : syncStage === 'syncing' ? 'Updating…' : game.over ? 'Game over' : canClaimTimeout ? 'Claim timeout win →' : !isMyTurn() ? 'Opponent’s turn' : queuedActions.length ? 'End turn →' : 'Pass →'}</button>
+                    <button class="submit-turn" onclick={() => commitTurn(canClaimTimeout)} disabled={!canAct() && !canClaimTimeout}>{syncStage === 'submitting' ? 'Sending…' : syncStage === 'confirming' ? 'Confirming…' : syncStage === 'syncing' ? 'Updating…' : game.over ? 'Game over' : canClaimTimeout ? 'Claim timeout win →' : !isMyTurn() ? remotePreview ? 'Opponent move · pending' : 'Opponent’s turn' : queuedActions.length ? 'End turn →' : 'Pass →'}</button>
                 </div>
                 <div class="connection-line" role="status" aria-live="polite">{errorMsg ?? syncError ?? (busy || (syncStage === 'idle' ? queuedActions.length ? 'Plan ready' : ' ' : 'Waiting for the network…'))}</div>
             </footer>
@@ -944,8 +975,15 @@
                 <header><strong>{overlay === 'stack' ? 'Pending abilities' : overlay === 'history' ? 'Last moves' : `Game #${game.id}`}</strong><button aria-label="Close panel" onclick={closeOverlay}>✕</button></header>
                 <div class="sheet-body">
                     {#if overlay === 'stack'}
-                        <StackPanel stack={preview?.stack ?? pendingStack} confirmedId={pendingStack.nextId} turn={game.turnCount} viewer={mySlot} caps={simCaps} definitions={capDefMap} layout={activeLayout} actor={selectedActor} targeting={stackTargetMode} canActivate={canActivateSelected} focusedId={focusedEffectId} onfocus={(id) => { focusedEffectId = id; closeOverlay(); }} ontarget={targetPending} oncancel={closeOverlay} />
+                        <StackPanel stack={displayedStack} confirmedId={pendingStack.nextId} turn={game.turnCount} viewer={mySlot} caps={simCaps} definitions={capDefMap} layout={activeLayout} actor={selectedActor} targeting={stackTargetMode} canActivate={canActivateSelected} focusedId={focusedEffectId} onfocus={(id) => { focusedEffectId = id; closeOverlay(); }} ontarget={targetPending} oncancel={closeOverlay} />
                     {:else if overlay === 'history'}
+                        {#if remotePreview && activeIncoming}
+                            <section class="opponent-last" aria-label="Opponent’s pending turn">
+                                <strong>Opponent · pending confirmation</strong>
+                                {#if !activeIncoming.actions.length}<p>Passing.</p>{/if}
+                                {#each activeIncoming.actions as action}<p>{actionLabel(action, game.caps, capDefMap)}</p>{/each}
+                            </section>
+                        {/if}
                         {#if timedOut}<p class="timeout-result">P{clockSample!.clock.timedOutSlot + 1} ran out of time. P{game.winnerSlot + 1} wins.</p>{/if}
             {#if latestOpponent}
                 <section class="opponent-last" aria-label="Opponent’s last turn">

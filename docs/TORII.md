@@ -59,3 +59,28 @@ To inspect indexed games in the GraphQL explorer:
   }
 }
 ```
+
+## Signed move previews and confirmed events
+
+Submitting a turn publishes a signed `caps-MoveIntent` to Torii through the unary
+gRPC-web `/world.World/PublishMessage` endpoint on the same HTTP URL. Both the
+client and bot publish: submitted (`status=0`), broadcast with transaction hash
+(`1`), and cancelled/reverted (`2`). Torii verifies the account signature and
+monotonically increasing millisecond timestamps. No additional ports are exposed.
+Preview publication is best effort and never blocks a transaction.
+
+The client subscribes to `entityUpdated` for these intents. It checks the world,
+game, current turn and active player, then validates actions with the shared game
+preview rules. Opponent pieces and the ability stack appear immediately with a
+pending label. Hints expire after 60 seconds, and cancellation, a reverted receipt,
+or advancing authoritative state removes them. Hints never advance the turn,
+change clocks, declare a winner, or make the bot act. RPC snapshots and existing
+`TurnRecord` history remain authoritative; polling still works without Torii.
+
+An accepted onchain turn emits `caps-MoveCommitted`, keyed by game and completed
+turn, containing the same `MoveIntent` structure and encoded actions, with
+`status=3`, the real transaction hash, and the block timestamp in milliseconds.
+Torii indexes it as an event message (`eventMessageUpdated`), separate from signed
+model entities. Consumers must never treat a relayed status value as confirmation.
+Reverted actions and submissions that lose on time do not emit a committed move.
+The onchain system does not read or write the offchain preview model.

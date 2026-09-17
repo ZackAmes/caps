@@ -1,3 +1,5 @@
+use caps::models::move_intent::{MoveIntent, MoveCommitted};
+use dojo::event::Event;
 use caps::logic::track::{is_valid_step, is_walkable, path_distance};
 use caps::models::cap::{Cap, Location, m_Cap};
 use caps::models::effect::m_Effect;
@@ -17,6 +19,7 @@ pub fn setup() -> (WorldStorage, IActionsDispatcher, u64) {
         namespace: "caps",
         resources: [
             TestResource::Model(m_Game::TEST_CLASS_HASH),
+            TestResource::Event(caps::models::move_intent::e_MoveCommitted::TEST_CLASS_HASH),
             TestResource::Model(caps::models::board::m_PublishedBoard::TEST_CLASS_HASH),
             TestResource::Model(caps::models::board::m_BoardDistances::TEST_CLASS_HASH),
             TestResource::Model(caps::models::board::m_BoardRegistry::TEST_CLASS_HASH),
@@ -87,6 +90,28 @@ fn initial_hand_and_free_deployment() {
     );
     let cap: Cap = world.read_model(5);
     assert!(cap.location == Location::Board(Vec2 { x: 2, y: 0 }), "deployed");
+    let expected = MoveCommitted {
+        game_id: id, turn: 0,
+        intent: MoveIntent {
+            identity: 0x123.try_into().unwrap(), game_id: id, turn: 0,
+            world: world.dispatcher.contract_address,
+            timestamp: starknet::get_block_timestamp() * 1000,
+            tx_hash: starknet::get_tx_info().unbox().transaction_hash,
+            status: 3, actions: array![1, 5, 0, 2, 0],
+        },
+    };
+    let mut found = false;
+    while let Option::Some(event) = testing::pop_log::<world::Event>(world.dispatcher.contract_address) {
+        if let world::Event::EventEmitted(event) = event {
+            if event.selector == Event::<MoveCommitted>::selector(dojo::utils::bytearray_hash(@"caps")) {
+                assert!(!found, "one committed move per turn");
+                assert!(event.keys == expected.serialized_keys(), "event game and turn");
+                assert!(event.values == expected.serialized_values(), "shared move payload");
+                found = true;
+            }
+        }
+    }
+    assert!(found, "accepted turn emits move event");
 }
 
 #[test]
