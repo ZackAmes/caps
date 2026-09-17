@@ -4,8 +4,7 @@ export interface ArtSpot { x:number; y:number; px:number; py:number }
 export interface ArtSegment { from:Position; to:Position }
 export interface BoardArt { width:number; height:number; spots:ArtSpot[]; segments:ArtSegment[] }
 
-// Frontend-only placement. Logical coordinates still identify spots in actions and abilities.
-// Ring spots can be moved freely here without changing the movement graph or contracts.
+// Preserve artwork for legacy built-in games. Published maps carry their own onchain artwork.
 const ringPositions: Record<string,Position> = {};
 for (const y of [0,8]) for(let x=0;x<7;x++) ringPositions[`${x},${y}`]=[x-3,y===0?-3.6:3.6];
 for (const x of [0,6]) for(const y of [2,4,6]) ringPositions[`${x},${y}`]=[x-3,(y-4)*0.9];
@@ -15,6 +14,13 @@ for (const x of [1,3,5]) for(const y of [2,4,6]) {
 const cache = new WeakMap<LayoutConfig,BoardArt>();
 export function boardArt(layout:LayoutConfig):BoardArt {
     const cached=cache.get(layout); if(cached)return cached;
+    if(layout.artwork) {
+        const {width,height,spots:positions,routes}=layout.artwork;
+        const spots=positions.map(s=>({x:s.at[0],y:s.at[1],px:s.position[0],py:s.position[1]}));
+        const point=(p:Position)=>positions.find(s=>s.at[0]===p[0]&&s.at[1]===p[1])!.position;
+        const segments=routes.flatMap(r=>{const points=[point(r.from),...r.via,point(r.to)];return points.slice(1).map((to,i)=>({from:points[i],to}));});
+        const result={width,height,spots,segments};cache.set(layout,result);return result;
+    }
     const ring=layout.id===LAYOUT_DUEL_RING;
     const point=(x:number,y:number):Position => ring ? ringPositions[`${x},${y}`] : [x-(layout.width-1)/2,y-(layout.height-1)/2];
     const spots:ArtSpot[]=[];

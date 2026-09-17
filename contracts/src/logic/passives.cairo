@@ -1,3 +1,4 @@
+use caps::logic::track::BoardGeometry;
 use caps::logic::track::within_range;
 use caps::models::cap::{Cap, get_position, is_on_board};
 use caps::models::effect::{Condition, Passive, PassiveKind, PassiveTarget, Relation};
@@ -15,7 +16,7 @@ fn related(source: Cap, other: Cap, relation: Relation) -> bool {
 }
 
 pub fn condition_met(
-    condition: Condition, source: Cap, max_health: u16, caps: @Array<Cap>, layout: u8,
+    condition: Condition, source: Cap, max_health: u16, caps: @Array<Cap>, layout: BoardGeometry,
 ) -> bool {
     let pos = match get_position(@source) {
         Option::Some(p) => p,
@@ -68,7 +69,7 @@ pub fn condition_met(
 }
 
 pub fn is_active(
-    passive: Passive, source: Cap, max_health: u16, caps: @Array<Cap>, layout: u8,
+    passive: Passive, source: Cap, max_health: u16, caps: @Array<Cap>, layout: BoardGeometry,
 ) -> bool {
     if !is_on_board(@source) {
         return false;
@@ -81,7 +82,7 @@ pub fn is_active(
     true
 }
 
-fn affects(passive: Passive, source: Cap, target: Cap, layout: u8) -> bool {
+fn affects(passive: Passive, source: Cap, target: Cap, layout: BoardGeometry) -> bool {
     if !is_on_board(@target) {
         return false;
     }
@@ -108,7 +109,7 @@ fn affects(passive: Passive, source: Cap, target: Cap, layout: u8) -> bool {
 /// Each eligible source contributes once. Stacking is additive and saturates at u16::MAX.
 /// Conditions read base board state only: passive bonuses cannot recursively enable passives.
 pub fn bonus(
-    kind: PassiveKind, target: Cap, caps: @Array<Cap>, definitions: @Array<CapType>, layout: u8,
+    kind: PassiveKind, target: Cap, caps: @Array<Cap>, definitions: @Array<CapType>, layout: BoardGeometry,
 ) -> u16 {
     let mut result: u16 = 0;
     for source in caps.span() {

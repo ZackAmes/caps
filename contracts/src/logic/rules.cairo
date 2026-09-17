@@ -1,4 +1,5 @@
-use caps::logic::board_data::energy_space;
+use caps::logic::track::BoardGeometry;
+use caps::logic::track::energy_space;
 use caps::logic::track::{get_p1_deploy_spot, get_p2_deploy_spot, get_walkable_neighbors};
 use caps::models::cap::{Cap, Location};
 use caps::models::game::Vec2;
@@ -17,7 +18,7 @@ pub fn index_at(caps: @Array<Cap>, pos: Vec2) -> usize {
     caps.len()
 }
 
-pub fn is_surrounded(caps: @Array<Cap>, layout: u8, pos: Vec2) -> bool {
+pub fn is_surrounded(caps: @Array<Cap>, layout: BoardGeometry, pos: Vec2) -> bool {
     let idx = index_at(caps, pos);
     if idx == caps.len() {
         return false;
@@ -44,7 +45,7 @@ pub fn capture_ready_turn(turn: u64, slot: u8) -> u64 {
     })
 }
 
-pub fn is_goal(cap: Cap, layout: u8) -> bool {
+pub fn is_goal(cap: Cap, layout: BoardGeometry) -> bool {
     match cap.location {
         Location::Board(p) => p == (if cap.player_slot == 0 {
             get_p2_deploy_spot(layout)
@@ -55,7 +56,7 @@ pub fn is_goal(cap: Cap, layout: u8) -> bool {
     }
 }
 
-pub fn objective_income(caps: @Array<Cap>, slot: u8, layout: u8) -> u8 {
+pub fn objective_income(caps: @Array<Cap>, slot: u8, layout: BoardGeometry) -> u8 {
     let mut income = 0;
     for c in caps.span() {
         if *c.player_slot == slot {

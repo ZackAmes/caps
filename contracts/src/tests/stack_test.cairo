@@ -138,12 +138,12 @@ fn stable_ids_and_lifo_readiness() {
             amount: 4,
         },
     };
-    schedule(ref stack, 1, 0, 0, 0, request);
-    schedule(ref stack, 2, 1, 1, 0, request);
+    schedule(ref stack, 1, 0, 0, caps::logic::track::legacy(0), request);
+    schedule(ref stack, 2, 1, 1, caps::logic::track::legacy(0), request);
     assert!(pop_ready(ref stack, 2).is_none(), "strict stack order");
     counter(ref stack, 2);
     assert!(pop_ready(ref stack, 2).unwrap().id == 1, "counter exposes older ready item");
-    schedule(ref stack, 1, 0, 2, 0, request);
+    schedule(ref stack, 1, 0, 2, caps::logic::track::legacy(0), request);
     assert!(*stack.entries.at(0).id == 3, "ids never reused");
 }
 
@@ -156,7 +156,7 @@ fn zero_delay_is_rejected() {
         1,
         0,
         0,
-        0,
+        caps::logic::track::legacy(0),
         Schedule {
             delay: 0,
             impact: DelayedImpact {
@@ -228,7 +228,7 @@ fn delayed_heal_clamps_without_overflow() {
         99,
         0,
         0,
-        0,
+        caps::logic::track::legacy(0),
         Schedule {
             delay: 1,
             impact: DelayedImpact {
@@ -255,7 +255,7 @@ fn delayed_heal_clamps_without_overflow() {
         },
     ];
     let definitions = array![caps::sets::set_zero::cap_type_of(1).unwrap()];
-    caps::logic::stack::resolve(entry, ref caps, @definitions, 0);
+    caps::logic::stack::resolve(entry, ref caps, @definitions, caps::logic::track::legacy(0));
     assert!(*caps.at(0).health == 6, "clamped to actual max health");
 }
 
@@ -273,7 +273,7 @@ fn stack_target_negates_selected_effect_and_records_turn() {
         10,
         1,
         0,
-        0,
+        caps::logic::track::legacy(0),
         Schedule {
             delay: 1,
             impact: DelayedImpact {
@@ -289,7 +289,7 @@ fn stack_target_negates_selected_effect_and_records_turn() {
         10,
         1,
         0,
-        0,
+        caps::logic::track::legacy(0),
         Schedule {
             delay: 1,
             impact: DelayedImpact {
@@ -353,7 +353,7 @@ fn large_map_delayed_row_uses_map_height() {
         1,
         0,
         0,
-        4,
+        caps::logic::track::legacy(4),
         Schedule {
             delay: 1,
             impact: DelayedImpact {
@@ -380,7 +380,7 @@ fn large_map_rejects_row_outside_board() {
         1,
         0,
         0,
-        4,
+        caps::logic::track::legacy(4),
         Schedule {
             delay: 1,
             impact: DelayedImpact {

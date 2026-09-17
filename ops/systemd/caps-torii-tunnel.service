@@ -1,0 +1,14 @@
+[Unit]
+Description=Temporary HTTPS tunnel for CAPS Torii
+After=network-online.target caps-torii.service
+Wants=network-online.target caps-torii.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/caps/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8081 --protocol http2
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

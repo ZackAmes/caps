@@ -1,4 +1,5 @@
 import manifest from './manifest.json';
+import indexer from './torii.json';
 
 const actionsContract = manifest.contracts.find((c) => c.tag === 'caps-actions');
 
@@ -17,6 +18,7 @@ const rpcUrl = rpcKey ? `${CARTRIDGE_RPC}?key=${rpcKey}` : CARTRIDGE_RPC;
 export const dojoConfig = {
     // Sepolia network
     rpcUrl,
+    toriiUrl: import.meta.env.VITE_TORII_URL ?? (BigInt(indexer.world) === BigInt(manifest.world.address) ? indexer.url : ''),
     chainId: 'SN_SEPOLIA' as const,
 
     // Deployed world address
@@ -25,6 +27,7 @@ export const dojoConfig = {
     // Contract tags → addresses
     contracts: {
         actions: actionsContract.address,
+        boards: manifest.contracts.find(c => c.tag === 'caps-boards')?.address ?? '',
     },
 } as const;
 

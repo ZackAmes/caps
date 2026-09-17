@@ -3,13 +3,13 @@ import { isEnergySpace, pathDistances, pathDistance } from '@caps/game-core/boar
 import { passiveBonus } from '@caps/game-core/passives';
 import { previewTurn } from '@caps/game-core/preview';
 import type { ChainCap, TurnAction } from '@caps/game-core/types';
-import type { PositionV6 } from '../game/v6';
+import type { PositionV7 } from '../game/v7';
 import type { Strategy } from '../ports';
 
 type Preview = ReturnType<typeof previewTurn>;
 
 /** Small deterministic beam search. No RPC, signing, account keys, or worker state. */
-export const greedyStrategy: Strategy<PositionV6, TurnAction> = {
+export const greedyStrategy: Strategy<PositionV7, TurnAction> = {
   name: 'greedy-v1',
   chooseTurn(position) {
     const simulate = (queue: TurnAction[]) => previewTurn(position.game, position.hand, position.definitions, position.layout, queue, position.stack);
@@ -40,7 +40,7 @@ export const greedyStrategy: Strategy<PositionV6, TurnAction> = {
   },
 };
 
-function candidates(p: PositionV6, state: Preview, slot: number): TurnAction[] {
+function candidates(p: PositionV7, state: Preview, slot: number): TurnAction[] {
   const actions: TurnAction[] = [];
   const deploy = slot === 0 ? p.layout.p1Deploy : p.layout.p2Deploy;
   if (state.actions > 0) for (const id of state.hand) actions.push({ capId: id, kind: 'Play', x: deploy[0], y: deploy[1] });
@@ -61,12 +61,12 @@ function candidates(p: PositionV6, state: Preview, slot: number): TurnAction[] {
   return actions;
 }
 
-function goalDistances(p: PositionV6, slot: number): Map<string, number> {
+function goalDistances(p: PositionV7, slot: number): Map<string, number> {
   const goal = slot === 0 ? p.layout.p2Deploy : p.layout.p1Deploy;
   return pathDistances(p.layout, goal);
 }
 
-function score(p: PositionV6, state: Preview, slot: number, distances: Map<string, number>): number {
+function score(p: PositionV7, state: Preview, slot: number, distances: Map<string, number>): number {
   if (state.winnerSlot !== null) return state.winnerSlot === slot ? 1_000_000 : -1_000_000;
   // Response moves are scored after effects due at this turn boundary.
   const before = state;

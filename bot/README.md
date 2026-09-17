@@ -1,7 +1,7 @@
 # CAPS bot
 
-The checked-in manifest targets the September 9, 2026 rules v6 Sepolia deployment.
-The background bot runs from `~/caps` with a separate v6 checkpoint.
+The checked-in manifest targets the September 9, 2026 rules v7 Sepolia deployment.
+The background bot runs from `~/caps` with a separate v7 checkpoint.
 
 A standalone Sepolia player with its own account. Anyone can challenge the address in
 [account.public.json](account.public.json), or use **Play against Bot** in the game lobby.
@@ -46,7 +46,7 @@ Stop the old worker before starting the replacement.
 
 - `src/worker.ts` handles discovery, turn ownership, retrying, and checkpoints. It has no
   board logic. `src/ports.ts` defines its adapter and strategy interfaces.
-- `src/game/v6.ts` owns ABI reads, transaction encoding, and constructing a v6 position.
+- `src/game/v7.ts` owns ABI reads, transaction encoding, and constructing a v7 position.
   Unsupported rules versions, sets, and layouts are rejected rather than guessed.
 - `src/strategies/greedy.ts` is a pure function. Replace it and select the replacement in
   `src/main.ts` to change play style without touching accounts or polling.
@@ -75,3 +75,12 @@ The v6 clock upgrade keeps the same world. The local service uses
 transactions are retained. On opponent turns the adapter reads the authoritative clock
 and claims expired games. Claims share the worker's transaction tracking and nonce
 serialization with ordinary turns. The strategy remains independent of clock/ABI code.
+
+Rules 7 adds permissionless boards. The adapter loads the game’s board ID and published
+definition from the configured manifest’s registry; strategies still receive a pure
+LayoutConfig. BOT_BOARDS_ADDRESS can override the registry address. The live service
+uses checkpoint-v7.json, preserving discovery and pending transactions from v6.
+
+Torii subscription setup and local service commands are in [docs/TORII.md](../docs/TORII.md).
+Game updates involving the bot wake its serialized worker immediately. Periodic
+polls still handle reconnects, timeouts, and transaction confirmation.

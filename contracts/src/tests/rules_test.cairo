@@ -17,6 +17,12 @@ pub fn setup() -> (WorldStorage, IActionsDispatcher, u64) {
         namespace: "caps",
         resources: [
             TestResource::Model(m_Game::TEST_CLASS_HASH),
+            TestResource::Model(caps::models::board::m_PublishedBoard::TEST_CLASS_HASH),
+            TestResource::Model(caps::models::board::m_BoardDistances::TEST_CLASS_HASH),
+            TestResource::Model(caps::models::board::m_BoardRegistry::TEST_CLASS_HASH),
+            TestResource::Model(caps::models::board::m_GameBoard::TEST_CLASS_HASH),
+            TestResource::Model(caps::models::board::m_BoardPublication::TEST_CLASS_HASH),
+            TestResource::Contract(caps::systems::boards::boards::TEST_CLASS_HASH),
             TestResource::Model(caps::models::game_clock::m_GameClock::TEST_CLASS_HASH),
             TestResource::Model(caps::models::turn_record::m_TurnRecord::TEST_CLASS_HASH),
             TestResource::Model(caps::models::stack::m_AbilityStack::TEST_CLASS_HASH),
@@ -36,6 +42,7 @@ pub fn setup() -> (WorldStorage, IActionsDispatcher, u64) {
     world
         .sync_perms_and_inits(
             [
+                ContractDefTrait::new(@"caps", @"boards").with_writer_of([dojo::utils::bytearray_hash(@"caps")].span()),
                 ContractDefTrait::new(@"caps", @"actions")
                     .with_writer_of([dojo::utils::bytearray_hash(@"caps")].span())
             ]
@@ -364,7 +371,7 @@ fn duel_grid_connections_and_goal() {
     while y < 5 {
         let mut x = 0;
         while x < 7 {
-            if is_walkable(5, Vec2 { x, y }) {
+            if is_walkable(caps::logic::track::legacy(5), Vec2 { x, y }) {
                 count += 1;
             }
             x += 1;
@@ -372,14 +379,14 @@ fn duel_grid_connections_and_goal() {
         y += 1;
     }
     assert!(count == 29, "twenty outer spots and nine inner spots");
-    assert!(is_valid_step(5, Vec2 { x: 2, y: 0 }, Vec2 { x: 3, y: 1 }), "p1 right approach");
-    assert!(is_valid_step(5, Vec2 { x: 4, y: 4 }, Vec2 { x: 3, y: 3 }), "p2 right approach");
+    assert!(is_valid_step(caps::logic::track::legacy(5), Vec2 { x: 2, y: 0 }, Vec2 { x: 3, y: 1 }), "p1 right approach");
+    assert!(is_valid_step(caps::logic::track::legacy(5), Vec2 { x: 4, y: 4 }, Vec2 { x: 3, y: 3 }), "p2 right approach");
     assert!(
-        !is_valid_step(5, Vec2 { x: 3, y: 0 }, Vec2 { x: 3, y: 1 }),
+        !is_valid_step(caps::logic::track::legacy(5), Vec2 { x: 3, y: 0 }, Vec2 { x: 3, y: 1 }),
         "goal has no direct inner edge",
     );
     assert!(
-        path_distance(5, Vec2 { x: 1, y: 2 }, Vec2 { x: 3, y: 2 }) == Option::Some(1),
+        path_distance(caps::logic::track::legacy(5), Vec2 { x: 1, y: 2 }, Vec2 { x: 3, y: 2 }) == Option::Some(1),
         "inner horizontal edge is one step",
     );
     let (mut world, api, _) = setup();

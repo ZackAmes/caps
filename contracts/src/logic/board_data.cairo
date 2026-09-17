@@ -48,7 +48,7 @@ pub fn energy_space(layout: u8, pos: Vec2) -> bool {
         _ => false,
     }
 }
-fn packed_distances(layout: u8, source: u8) -> Array<u128> {
+pub fn packed_distances(layout: u8, source: u8) -> Array<u128> {
     // Sixteen byte distances per u128 keep the Sierra class below the size limit.
     match (layout, source) {
         (0, 0) => array![4024030065057452588127635704406737152, 148080050112674398207],

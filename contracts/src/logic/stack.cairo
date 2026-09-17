@@ -1,3 +1,4 @@
+use caps::logic::track::BoardGeometry;
 use caps::logic::ops::{apply_damage, apply_heal, apply_shield};
 use caps::logic::passives::bonus;
 use caps::logic::track::{is_walkable, within_range};
@@ -11,7 +12,7 @@ pub fn schedule(
     source_id: u64,
     player_slot: u8,
     turn: u64,
-    layout: u8,
+    layout: BoardGeometry,
     request: Schedule,
 ) {
     assert!(request.delay >= 1 && request.delay <= 8, "Delay must be 1 to 8");
@@ -68,7 +69,7 @@ pub fn pop_ready(ref stack: AbilityStack, boundary: u64) -> Option<StackEntry> {
     Option::Some(top)
 }
 
-fn selected(entry: StackEntry, cap: Cap, layout: u8) -> bool {
+fn selected(entry: StackEntry, cap: Cap, layout: BoardGeometry) -> bool {
     if !is_on_board(@cap) {
         return false;
     }
@@ -93,7 +94,7 @@ fn selected(entry: StackEntry, cap: Cap, layout: u8) -> bool {
 
 /// One area impact is simultaneous: mitigation and target selection use one snapshot.
 /// Completed announcements survive source death/capture; missing targets simply do nothing.
-pub fn resolve(entry: StackEntry, ref caps: Array<Cap>, definitions: @Array<CapType>, layout: u8) {
+pub fn resolve(entry: StackEntry, ref caps: Array<Cap>, definitions: @Array<CapType>, layout: BoardGeometry) {
     let snapshot = caps.clone();
     for cap in snapshot.span() {
         if selected(entry, *cap, layout) {

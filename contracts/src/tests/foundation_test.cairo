@@ -41,23 +41,23 @@ fn definition(id: u16, passives: Array<Passive>) -> CapType {
 #[test]
 fn path_edges_not_grid_proximity() {
     assert!(
-        path_distance(0, Vec2 { x: 1, y: 0 }, Vec2 { x: 0, y: 1 }) == Option::Some(2),
+        path_distance(caps::logic::track::legacy(0), Vec2 { x: 1, y: 0 }, Vec2 { x: 0, y: 1 }) == Option::Some(2),
         "no corner cut",
     );
     assert!(
-        path_distance(0, Vec2 { x: 2, y: 0 }, Vec2 { x: 2, y: 4 }) == Option::Some(8),
+        path_distance(caps::logic::track::legacy(0), Vec2 { x: 2, y: 0 }, Vec2 { x: 2, y: 4 }) == Option::Some(8),
         "perimeter range",
     );
     assert!(
-        path_distance(1, Vec2 { x: 2, y: 0 }, Vec2 { x: 2, y: 4 }) == Option::Some(4),
+        path_distance(caps::logic::track::legacy(1), Vec2 { x: 2, y: 0 }, Vec2 { x: 2, y: 4 }) == Option::Some(4),
         "cross range",
     );
-    assert!(is_valid_step(2, Vec2 { x: 0, y: 0 }, Vec2 { x: 1, y: 1 }), "diagonal edge");
+    assert!(is_valid_step(caps::logic::track::legacy(2), Vec2 { x: 0, y: 0 }, Vec2 { x: 1, y: 1 }), "diagonal edge");
     assert!(
-        path_distance(3, Vec2 { x: 2, y: 0 }, Vec2 { x: 3, y: 2 }) == Option::Some(2),
+        path_distance(caps::logic::track::legacy(3), Vec2 { x: 2, y: 0 }, Vec2 { x: 3, y: 2 }) == Option::Some(2),
         "diamond junction",
     );
-    assert!(path_distance(0, Vec2 { x: 1, y: 1 }, Vec2 { x: 1, y: 1 }).is_none(), "invalid tile");
+    assert!(path_distance(caps::logic::track::legacy(0), Vec2 { x: 1, y: 1 }, Vec2 { x: 1, y: 1 }).is_none(), "invalid tile");
 }
 #[test]
 fn row_conditions_and_board_lifetime() {
@@ -65,20 +65,20 @@ fn row_conditions_and_board_lifetime() {
     let ally = piece(2, 0, 3, 0);
     let enemy = piece(3, 1, 4, 0);
     let p = passive(array![Condition::PieceInRow(Relation::Ally)].span());
-    assert!(!is_active(p, source, 20, @array![source, enemy], 0), "self and enemy excluded");
-    assert!(is_active(p, source, 20, @array![source, ally, enemy], 0), "ally activates");
+    assert!(!is_active(p, source, 20, @array![source, enemy], caps::logic::track::legacy(0)), "self and enemy excluded");
+    assert!(is_active(p, source, 20, @array![source, ally, enemy], caps::logic::track::legacy(0)), "ally activates");
     source.stunned_turns = 1;
     assert!(
-        is_active(p, source, 20, @array![source, ally], 0), "stun does not disable board traits",
+        is_active(p, source, 20, @array![source, ally], caps::logic::track::legacy(0)), "stun does not disable board traits",
     );
     source.location = Location::Bench;
     assert!(
-        !is_active(passive(array![].span()), source, 20, @array![source, ally], 0),
+        !is_active(passive(array![].span()), source, 20, @array![source, ally], caps::logic::track::legacy(0)),
         "bench is inactive",
     );
     source.location = Location::Dead;
     assert!(
-        !is_active(passive(array![].span()), source, 20, @array![source, ally], 0),
+        !is_active(passive(array![].span()), source, 20, @array![source, ally], caps::logic::track::legacy(0)),
         "dead is inactive",
     );
 }
@@ -87,13 +87,13 @@ fn conditions_are_conjunctive_and_health_is_percentage() {
     let mut source = piece(1, 0, 1, 0);
     let ally = piece(2, 0, 0, 1);
     assert!(
-        !condition_met(Condition::AllyWithin(1), source, 20, @array![source, ally], 0),
+        !condition_met(Condition::AllyWithin(1), source, 20, @array![source, ally], caps::logic::track::legacy(0)),
         "path adjacency",
     );
     let p = passive(array![Condition::AllyWithin(2), Condition::HealthBelowPercent(50)].span());
-    assert!(!is_active(p, source, 20, @array![source, ally], 0), "strictly below threshold");
+    assert!(!is_active(p, source, 20, @array![source, ally], caps::logic::track::legacy(0)), "strictly below threshold");
     source.health = 9;
-    assert!(is_active(p, source, 20, @array![source, ally], 0), "all conditions met");
+    assert!(is_active(p, source, 20, @array![source, ally], caps::logic::track::legacy(0)), "all conditions met");
 }
 #[test]
 fn auras_derive_from_current_board_and_stack() {
@@ -106,12 +106,12 @@ fn auras_derive_from_current_board_and_stack() {
     p2.target = PassiveTarget::AlliesWithin(2);
     let defs = array![definition(1, array![p]), definition(2, array![]), definition(3, array![p2])];
     assert!(
-        bonus(PassiveKind::AttackBonus, b, @array![a, b, c], @defs, 0) == 6, "additive stacking",
+        bonus(PassiveKind::AttackBonus, b, @array![a, b, c], @defs, caps::logic::track::legacy(0)) == 6, "additive stacking",
     );
     c.location = Location::Bench;
-    assert!(bonus(PassiveKind::AttackBonus, b, @array![a, b, c], @defs, 0) == 3, "removed source");
+    assert!(bonus(PassiveKind::AttackBonus, b, @array![a, b, c], @defs, caps::logic::track::legacy(0)) == 3, "removed source");
     b.location = Location::Board(Vec2 { x: 2, y: 0 });
-    assert!(bonus(PassiveKind::AttackBonus, b, @array![a, b, c], @defs, 0) == 0, "left radius");
+    assert!(bonus(PassiveKind::AttackBonus, b, @array![a, b, c], @defs, caps::logic::track::legacy(0)) == 0, "left radius");
 }
 
 /// Test-only set: exercises the framework without changing the playable roster.
@@ -216,29 +216,29 @@ fn passive_stacking_saturates_without_overflowing_energy_cap() {
     let mut p = passive(array![].span());
     p.amount = 65535;
     let defs = array![definition(1, array![p, p])];
-    assert!(bonus(PassiveKind::AttackBonus, c, @array![c], @defs, 0) == 65535, "saturating bonus");
+    assert!(bonus(PassiveKind::AttackBonus, c, @array![c], @defs, caps::logic::track::legacy(0)) == 65535, "saturating bonus");
     assert!(caps::logic::rules::add_energy(5, 65535) == 5, "energy cap does not overflow");
 }
 
 #[test]
 fn large_map_geometry_income_and_enemy_half() {
-    assert!(get_board_dimensions(4) == (7, 9), "larger dimensions");
-    assert!(get_board_dimensions(0) == (5, 5), "old dimensions");
+    assert!(get_board_dimensions(caps::logic::track::legacy(4)) == (7, 9), "larger dimensions");
+    assert!(get_board_dimensions(caps::logic::track::legacy(0)) == (5, 5), "old dimensions");
     assert!(
-        path_distance(4, Vec2 { x: 3, y: 0 }, Vec2 { x: 3, y: 2 }) == Option::Some(1),
+        path_distance(caps::logic::track::legacy(4), Vec2 { x: 3, y: 0 }, Vec2 { x: 3, y: 2 }) == Option::Some(1),
         "explicit edge",
     );
-    assert!(path_distance(4, Vec2 { x: 0, y: 0 }, Vec2 { x: 0, y: 0 }).is_none(), "void node");
-    assert!(get_walkable_neighbors(4, Vec2 { x: 7, y: 0 }).is_empty(), "outside board");
-    assert!(get_walkable_neighbors(99, Vec2 { x: 0, y: 0 }).is_empty(), "unknown board");
+    assert!(path_distance(caps::logic::track::legacy(4), Vec2 { x: 0, y: 0 }, Vec2 { x: 0, y: 0 }).is_none(), "void node");
+    assert!(get_walkable_neighbors(caps::logic::track::legacy(4), Vec2 { x: 7, y: 0 }).is_empty(), "outside board");
+    assert!(get_walkable_neighbors(caps::logic::track::legacy(99), Vec2 { x: 0, y: 0 }).is_empty(), "unknown board");
     let energy_piece = piece(1, 0, 0, 4);
-    assert!(objective_income(@array![energy_piece], 0, 4) == 1, "map energy");
-    assert!(!is_goal(energy_piece, 4), "old goal not reused");
-    assert!(is_goal(piece(2, 1, 3, 0), 4), "p2 goal");
+    assert!(objective_income(@array![energy_piece], 0, caps::logic::track::legacy(4)) == 1, "map energy");
+    assert!(!is_goal(energy_piece, caps::logic::track::legacy(4)), "old goal not reused");
+    assert!(is_goal(piece(2, 1, 3, 0), caps::logic::track::legacy(4)), "p2 goal");
     assert!(
-        !condition_met(Condition::OnEnemyHalf, piece(3, 0, 0, 3), 20, @array![], 4), "own half",
+        !condition_met(Condition::OnEnemyHalf, piece(3, 0, 0, 3), 20, @array![], caps::logic::track::legacy(4)), "own half",
     );
     assert!(
-        condition_met(Condition::OnEnemyHalf, piece(3, 0, 0, 5), 20, @array![], 4), "enemy half",
+        condition_met(Condition::OnEnemyHalf, piece(3, 0, 0, 5), 20, @array![], caps::logic::track::legacy(4)), "enemy half",
     );
 }

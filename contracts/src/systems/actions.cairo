@@ -12,6 +12,9 @@ use starknet::ContractAddress;
 #[starknet::interface]
 pub trait IActions<T> {
     fn rules_version(self: @T) -> u8;
+    fn get_game_board(self: @T, game_id: u64) -> u64;
+    fn create_game_with_board(ref self: T, p2: ContractAddress, board_id: u64) -> u64;
+    fn create_solo_game_with_board(ref self: T, board_id: u64) -> u64;
     fn get_clock(self: @T, game_id: u64) -> (GameClock, u64);
     fn claim_timeout(ref self: T, game_id: u64, expected_turn: u64);
     fn get_turn(self: @T, game_id: u64, turn: u64) -> Option<TurnRecord>;
@@ -103,7 +106,10 @@ pub mod actions {
         BASE_INCOME, add_energy, capture_ready_turn, is_goal, objective_income, spend_action,
     };
     use caps::logic::stack::{counter, pop_ready, resolve, schedule};
-    use caps::logic::track::within_range;
+    use caps::logic::track::{within_range, BoardGeometry};
+    use caps::models::board::GameBoard;
+    use caps::systems::boards::{IBoardsDispatcher, IBoardsDispatcherTrait};
+    use dojo::world::WorldStorageTrait;
     use caps::models::cap::{Cap, Location, get_position, is_on_board};
     use caps::models::effect::{Effect, EffectTarget, EffectTrait, EffectType, PassiveKind};
     use caps::models::game::{Action, ActionType, Game, Global, Hand};
@@ -139,9 +145,22 @@ pub mod actions {
     #[abi(embed_v0)]
     impl ActionsImpl of IActions<ContractState> {
         fn rules_version(self: @ContractState) -> u8 {
-            6
+            7
         }
 
+        fn get_game_board(self: @ContractState, game_id: u64) -> u64 {
+            let binding: GameBoard = self.world_default().read_model(game_id);
+            binding.board_id
+        }
+        fn create_game_with_board(ref self: ContractState, p2: ContractAddress, board_id: u64) -> u64 {
+            assert!(board_id > 0, "Board required");
+            self._create_game(get_caller_address(), p2, 255, board_id)
+        }
+        fn create_solo_game_with_board(ref self: ContractState, board_id: u64) -> u64 {
+            assert!(board_id > 0, "Board required");
+            let caller = get_caller_address();
+            self._create_game(caller, caller, 255, board_id)
+        }
         fn get_clock(self: @ContractState, game_id: u64) -> (GameClock, u64) {
             let world = self.world_default();
             let mut clock: GameClock = world.read_model(game_id);
@@ -204,24 +223,24 @@ pub mod actions {
 
         fn create_game(ref self: ContractState, p2: ContractAddress) -> u64 {
             let p1 = get_caller_address();
-            self._create_game(p1, p2, LAYOUT_PERIMETER_5X5)
+            self._create_game(p1, p2, LAYOUT_PERIMETER_5X5, 0)
         }
 
         fn create_game_with_layout(
             ref self: ContractState, p2: ContractAddress, layout: u8,
         ) -> u64 {
             let p1 = get_caller_address();
-            self._create_game(p1, p2, layout)
+            self._create_game(p1, p2, layout, 0)
         }
 
         fn create_solo_game(ref self: ContractState) -> u64 {
             let p1 = get_caller_address();
-            self._create_game(p1, p1, LAYOUT_PERIMETER_5X5)
+            self._create_game(p1, p1, LAYOUT_PERIMETER_5X5, 0)
         }
 
         fn create_solo_game_with_layout(ref self: ContractState, layout: u8) -> u64 {
             let p1 = get_caller_address();
-            self._create_game(p1, p1, layout)
+            self._create_game(p1, p1, layout, 0)
         }
 
         fn take_turn(ref self: ContractState, game_id: u64, turn: Array<Action>) {
@@ -247,6 +266,7 @@ pub mod actions {
                 self._lose_on_time(ref game, ref clock, slot, now);
                 return;
             }
+            let board = self._board(@game);
             assert!(turn.len() <= 32, "Too many actions");
             let mut stack: AbilityStack = world.read_model(game_id);
             stack.game_id = game_id;
@@ -297,9 +317,9 @@ pub mod actions {
                             is_in_hand(@hand, @caps, game.turn_count, cap.id), "Piece not in hand",
                         );
                         let deploy = if slot == 0 {
-                            get_p1_deploy_spot(game.layout)
+                            get_p1_deploy_spot(board)
                         } else {
-                            get_p2_deploy_spot(game.layout)
+                            get_p2_deploy_spot(board)
                         };
                         assert!(pos == deploy, "Must play at deploy spot");
                         assert!(!has_cap_at(@caps, pos), "Tile occupied");
@@ -311,7 +331,7 @@ pub mod actions {
                     ActionType::Move(pos) => {
                         spend_action(ref actions, ref moves, true);
                         let from = get_position(@cap).expect('Not on board');
-                        assert!(is_valid_step(game.layout, from, pos), "Must move one step");
+                        assert!(is_valid_step(board, from, pos), "Must move one step");
                         let target_idx = index_at(@caps, pos);
                         if target_idx < caps.len() {
                             let target = *caps.at(target_idx);
@@ -324,7 +344,7 @@ pub mod actions {
                                         cap,
                                         @caps,
                                         @definitions,
-                                        game.layout,
+                                        board,
                                     ),
                                 );
                             // Consume next-attack buffs only on contact combat.
@@ -351,7 +371,7 @@ pub mod actions {
                                 target,
                                 @caps,
                                 @definitions,
-                                game.layout,
+                                board,
                             );
                             attack = if attack > reduction {
                                 attack - reduction
@@ -407,7 +427,7 @@ pub mod actions {
                                     && def.ability_target != TargetType::AllyPending,
                                 "Choose a stack effect",
                             );
-                            assert!(is_walkable(game.layout, pos), "Invalid target tile");
+                            assert!(is_walkable(board, pos), "Invalid target tile");
                             let range: u16 = def.ability_range.into();
                             let range = range
                                 .saturating_add(
@@ -416,11 +436,11 @@ pub mod actions {
                                         cap,
                                         @caps,
                                         @definitions,
-                                        game.layout,
+                                        board,
                                     ),
                                 );
                             assert!(
-                                within_range(game.layout, from, pos, range), "Target out of range",
+                                within_range(board, from, pos, range), "Target out of range",
                             );
                             let ti = index_at(@caps, pos);
                             match def.ability_target {
@@ -489,7 +509,7 @@ pub mod actions {
                                         cap.id,
                                         slot,
                                         game.turn_count,
-                                        game.layout,
+                                        board,
                                         request,
                                     );
                                 },
@@ -510,7 +530,7 @@ pub mod actions {
                                             *caps.at(ti),
                                             @caps,
                                             @definitions,
-                                            game.layout,
+                                            board,
                                         );
                                         let amount = if d.amount > reduction {
                                             d.amount - reduction
@@ -535,7 +555,7 @@ pub mod actions {
                                             cap.id,
                                             slot,
                                             game.id,
-                                            game.layout,
+                                            board,
                                             ref game.next_effect_id,
                                             SetOp::Heal(
                                                 SetOpHeal {
@@ -555,7 +575,7 @@ pub mod actions {
                                         cap.id,
                                         slot,
                                         game.id,
-                                        game.layout,
+                                        board,
                                         ref game.next_effect_id,
                                         *op,
                                     );
@@ -590,7 +610,7 @@ pub mod actions {
                     resolved.append(entry);
                     let mut caps = alive_caps(@world, @game);
                     let current_definitions = self._definitions(game.set_id, @caps);
-                    resolve(entry, ref caps, @current_definitions, game.layout);
+                    resolve(entry, ref caps, @current_definitions, board);
                     for c in caps.span() {
                         world.write_model(c);
                     }
@@ -695,6 +715,18 @@ pub mod actions {
 
     #[generate_trait]
     impl PrivateImpl of PrivateTrait {
+        fn _geometry(self: @ContractState, layout: u8, board_id: u64) -> BoardGeometry {
+            let (address, _) = self.world_default().dns(@"boards").expect('Board registry missing');
+            IBoardsDispatcher {contract_address:address}.get_geometry(layout,board_id)
+        }
+        fn _board(self: @ContractState, game: @Game) -> BoardGeometry {
+            let id = if *game.layout == 255 {
+                let binding: GameBoard = self.world_default().read_model(*game.id);
+                binding.board_id
+            } else { 0 };
+            self._geometry(*game.layout,id)
+        }
+
         fn _lose_on_time(
             ref self: ContractState, ref game: Game, ref clock: GameClock, slot: u8, now: u64,
         ) {
@@ -724,15 +756,17 @@ pub mod actions {
         }
 
         fn _create_game(
-            ref self: ContractState, p1: ContractAddress, p2: ContractAddress, layout: u8,
+            ref self: ContractState, p1: ContractAddress, p2: ContractAddress, layout: u8, board_id: u64,
         ) -> u64 {
             let mut world = self.world_default();
-            let (width, _) = caps::logic::track::get_board_dimensions(layout);
+            let geometry = self._geometry(layout,board_id);
+            let (width, _) = caps::logic::track::get_board_dimensions(geometry);
             assert!(width > 0, "Unknown layout");
             assert!(p1.is_non_zero() && p2.is_non_zero(), "Invalid player");
             let mut global: Global = world.read_model(0);
 
             let game_id = global.games_counter + 1;
+            if board_id > 0 { world.write_model(@GameBoard { game_id, board_id }); }
             world.write_model(@fresh(game_id, get_block_timestamp()));
             global.games_counter = game_id;
 
@@ -862,9 +896,10 @@ pub mod actions {
         /// Arrival at a goal ends the game immediately. Otherwise capture simultaneously.
         fn _resolve_board(ref self: ContractState, ref game: Game, ref effects: Array<Effect>) {
             let mut world = self.world_default();
+            let board = self._board(@game);
             let caps = alive_caps(@world, @game);
             for c in caps.span() {
-                if is_goal(*c, game.layout) {
+                if is_goal(*c, board) {
                     game.over = true;
                     game.winner = *c.owner;
                     game.winner_slot = *c.player_slot;
@@ -874,7 +909,7 @@ pub mod actions {
             let mut captured: Array<u64> = array![];
             for c in caps.span() {
                 if let Location::Board(pos) = c.location {
-                    if is_surrounded(@caps, game.layout, *pos) {
+                    if is_surrounded(@caps, board, *pos) {
                         captured.append(*c.id);
                     }
                 }
@@ -911,17 +946,18 @@ pub mod actions {
         /// Prepare and store next player's actual budget so reads and validation agree.
         fn _begin_turn(ref self: ContractState, ref game: Game, ref effects: Array<Effect>) {
             let mut world = self.world_default();
+            let board = self._board(@game);
             let slot: u8 = (game.turn_count % 2).try_into().unwrap();
             let mut caps = alive_caps(@world, @game);
             let definitions = self._definitions(game.set_id, @caps);
             let mut income: u16 = BASE_INCOME.into()
-                + objective_income(@caps, slot, game.layout).into();
+                + objective_income(@caps, slot, board).into();
             for c in caps.span() {
                 if *c.player_slot == slot && is_on_board(c) {
                     income = income
                         .saturating_add(
                             bonus(
-                                PassiveKind::EnergyGeneration, *c, @caps, @definitions, game.layout,
+                                PassiveKind::EnergyGeneration, *c, @caps, @definitions, board,
                             ),
                         );
                 }
@@ -967,6 +1003,7 @@ pub mod actions {
         fn _end_turn(
             ref self: ContractState, ref game: Game, ref effects: Array<Effect>, slot: u8,
         ) {
+            let board = self._board(@game);
             let mut world = self.world_default();
             let mut caps = alive_caps(@world, @game);
             let definitions = self._definitions(game.set_id, @caps);
@@ -985,7 +1022,7 @@ pub mod actions {
                                     *caps.at(idx),
                                     @caps,
                                     @definitions,
-                                    game.layout,
+                                    board,
                                 );
                                 let damage: u16 = n.into();
                                 let amount = if damage > reduction {
@@ -1020,7 +1057,7 @@ pub mod actions {
                     cap.stunned_turns = 0;
                     if is_on_board(@cap) {
                         let amount = bonus(
-                            PassiveKind::Regeneration, cap, @caps, @definitions, game.layout,
+                            PassiveKind::Regeneration, cap, @caps, @definitions, board,
                         );
                         let (hp, _, _, _) = self._stats(game.set_id, cap.cap_type);
                         let healed = cap.health.saturating_add(amount);

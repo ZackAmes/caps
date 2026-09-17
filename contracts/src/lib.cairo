@@ -1,8 +1,10 @@
 pub mod systems {
+    pub mod boards;
     pub mod actions;
 }
 
 pub mod models {
+    pub mod board;
     pub mod cap;
     pub mod effect;
     pub mod game;
@@ -29,6 +31,7 @@ pub mod logic {
 
 #[cfg(test)]
 mod tests {
+    mod board_test;
     mod clock_test;
     mod foundation_test;
     mod rules_test;

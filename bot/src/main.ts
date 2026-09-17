@@ -1,6 +1,8 @@
+import { watchGames } from '@caps/game-core/torii';
+import { Wakeup } from './wakeup';
 import { Account, RpcProvider, constants } from 'starknet';
 import { loadConfig } from './config';
-import { CapsV6Adapter } from './game/v6';
+import { CapsV7Adapter } from './game/v7';
 import { greedyStrategy } from './strategies/greedy';
 import { FileStore } from './store';
 import { BotWorker, message } from './worker';
@@ -17,14 +19,21 @@ async function main() {
   const chainId = await provider.getChainId();
   if (chainId !== constants.StarknetChainId.SN_SEPOLIA) throw new Error('This bot is configured for Sepolia only');
   const account = new Account({ provider, address: config.address, signer: config.privateKey });
-  const adapter = new CapsV6Adapter(provider, account, config.actionsAddress);
+  const adapter = new CapsV7Adapter(provider, account, config.actionsAddress, config.boardsAddress);
   await adapter.checkCompatibility();
-  const identity = `${chainId}:${BigInt(config.actionsAddress)}:${BigInt(config.address)}:rules6`;
+  const identity = `${chainId}:${BigInt(config.actionsAddress)}:${BigInt(config.address)}:rules7`;
   const store = new FileStore(config.statePath);
   const unlock = store.lock();
   const abort = new AbortController();
   process.once('SIGTERM', () => abort.abort());
   process.once('SIGINT', () => abort.abort());
+  const wakeup = new Wakeup();
+  const stopIndexer = watchGames(config.toriiUrl, {
+    onGame: game => { if (game.players.some(p => BigInt(p) === BigInt(config.address))) {
+      log('indexer_game_update', { gameId: game.id, turn: game.turn }); wakeup.notify();
+    } },
+    onStatus: status => { log('indexer_status', {status}); if (status === 'live') wakeup.notify(); },
+  });
   try {
     const worker = new BotWorker(adapter, greedyStrategy, config.address, store.load(identity), store, log);
     log('started', { address: config.address, actionsAddress: config.actionsAddress, strategy: greedyStrategy.name });
@@ -34,13 +43,9 @@ async function main() {
       catch (error) { failures++; log('poll_retry', { error: message(error), failures }); }
       if (process.argv.includes('--once') || abort.signal.aborted) break;
       const delay = Math.min(config.pollMs * 2 ** Math.min(failures, 4), 120000);
-      await new Promise<void>(resolve => {
-        const stop = () => { clearTimeout(timer); resolve(); };
-        const timer = setTimeout(() => { abort.signal.removeEventListener('abort', stop); resolve(); }, delay);
-        abort.signal.addEventListener('abort', stop, { once: true });
-      });
+      await wakeup.wait(delay, abort.signal);
     } while (!abort.signal.aborted);
-  } finally { unlock(); }
+  } finally { stopIndexer(); unlock(); }
 }
 
 main().catch(error => {

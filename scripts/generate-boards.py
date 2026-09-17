@@ -21,7 +21,7 @@ lines += ['pub fn energy_space(layout: u8, pos: Vec2) -> bool {', '    match lay
 for b in boards:
     expr=' || '.join(f'(pos.x == {x} && pos.y == {y})' for x,y in b['energySpaces']) or 'false'
     lines.append(f"        {b['id']} => {expr},")
-lines += ['        _ => false,', '    }', '}', 'fn packed_distances(layout: u8, source: u8) -> Array<u128> {', '    // Sixteen byte distances per u128 keep the Sierra class below the size limit.', '    match (layout, source) {']
+lines += ['        _ => false,', '    }', '}', 'pub fn packed_distances(layout: u8, source: u8) -> Array<u128> {', '    // Sixteen byte distances per u128 keep the Sierra class below the size limit.', '    match (layout, source) {']
 for board in boards:
     width,height=board['width'],board['height']
     graph = {p:set(n) for p,n in graphs.get(board.get('extends'),{}).items()}

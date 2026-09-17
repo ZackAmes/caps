@@ -1,3 +1,4 @@
+use caps::logic::track::BoardGeometry;
 use caps::logic::track::{is_valid_step, is_walkable};
 use caps::models::cap::{Cap, Location};
 use caps::models::effect::{Effect, EffectTarget, EffectTrait, EffectType};
@@ -81,7 +82,7 @@ pub fn apply_op(
     actor_id: u64,
     actor_slot: u8,
     game_id: u64,
-    layout: u8,
+    layout: BoardGeometry,
     ref next_effect_id: u64,
     op: SetOp,
 ) -> bool {
@@ -185,7 +186,7 @@ pub fn apply_sacrifice(
     true
 }
 
-pub fn apply_push(ref caps: Array<Cap>, op: SetOpPush, layout: u8) -> bool {
+pub fn apply_push(ref caps: Array<Cap>, op: SetOpPush, layout: BoardGeometry) -> bool {
     let idx = match find_idx(@caps, op.target_cap) {
         Option::Some(i) => i,
         Option::None => { return false; },
@@ -223,7 +224,7 @@ pub fn apply_push(ref caps: Array<Cap>, op: SetOpPush, layout: u8) -> bool {
     true
 }
 
-pub fn apply_teleport(ref caps: Array<Cap>, op: SetOpTeleport, layout: u8) -> bool {
+pub fn apply_teleport(ref caps: Array<Cap>, op: SetOpTeleport, layout: BoardGeometry) -> bool {
     let idx = match find_idx(@caps, op.target_cap) {
         Option::Some(i) => i,
         Option::None => { return false; },

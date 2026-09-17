@@ -1,5 +1,8 @@
 # Mechanics foundation (rules v3)
 
+Rules 7 adds [permissionless published boards](PUBLISHED_BOARDS.md), including onchain
+visual positions and registry-supplied geometry for both the client and bot.
+
 Deployed with rules v4 to a fresh Sepolia world on September 8, 2026. The client
 manifest and background bot use this deployment.
 

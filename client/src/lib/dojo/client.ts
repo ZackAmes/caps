@@ -5,7 +5,9 @@ import { CallData, type Call } from 'starknet';
 import { decodeGame, decodeHand, decodeCapType, decodeStack, decodeTurnRecord } from '@caps/game-core/decode';
 import { provider, ACTIONS } from './transport';
 import { getAccount } from './account';
-import { LAYOUT_PERIMETER_5X5 } from '@caps/game-core/board';
+import { decodeBoard, encodeBoard, type BoardDraft, type PublishedBoard } from '@caps/game-core/published-board';
+import { dojoConfig } from './config';
+import { getLayout, LAYOUT_PERIMETER_5X5 } from '@caps/game-core/board';
 import type { ChainGame, ChainHand, CapTypeDef, TurnAction } from '@caps/game-core/types';
 
 /** Fetch a player's hand (public — both hands visible). */
@@ -62,7 +64,7 @@ async function requireCurrentRules(): Promise<void> {
   rulesVerification ??= provider.callContract({
     contractAddress: ACTIONS, entrypoint: 'rules_version', calldata: [],
   }).then(version => {
-    if (Number(version[0]) !== 6) throw new Error('This deployment uses an unsupported CAPS rules version.');
+    if (Number(version[0]) !== 7) throw new Error('This deployment uses an unsupported CAPS rules version.');
   }).catch((error: unknown) => {
     rulesVerification = null;
     throw error;
@@ -70,21 +72,21 @@ async function requireCurrentRules(): Promise<void> {
   return rulesVerification;
 }
 
-export async function createGame(p2: string, layout: number = LAYOUT_PERIMETER_5X5): Promise<void> {
+export async function createGame(p2: string, layout: number = LAYOUT_PERIMETER_5X5, boardId = 0): Promise<void> {
   await requireCurrentRules();
   await executeAndWait({
     contractAddress: ACTIONS,
-    entrypoint: "create_game_with_layout",
-    calldata: CallData.compile([p2, layout]),
+    entrypoint: boardId ? "create_game_with_board" : "create_game_with_layout",
+    calldata: CallData.compile([p2, boardId || layout]),
   });
 }
 
-export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5): Promise<void> {
+export async function createSoloGame(layout: number = LAYOUT_PERIMETER_5X5, boardId = 0): Promise<void> {
   await requireCurrentRules();
   await executeAndWait({
     contractAddress: ACTIONS,
-    entrypoint: "create_solo_game_with_layout",
-    calldata: CallData.compile([layout]),
+    entrypoint: boardId ? "create_solo_game_with_board" : "create_solo_game_with_layout",
+    calldata: CallData.compile([boardId || layout]),
   });
 }
 
@@ -161,13 +163,13 @@ export async function transactionState(hash: string): Promise<'pending'|'confirm
 export async function getGameSnapshot(id: number, minimumTurn = 0) {
   const {game,details} = await consistentSnapshot(() => getGame(id), async game => {
     const slot = game.turnCount % 2;
-    const [hand, otherHand, stack, definitions, clock] = await Promise.all([
+    const [hand, otherHand, stack, definitions, clock, layout] = await Promise.all([
       getHand(id,slot), getHand(id,1-slot), getStack(id),
       Promise.all([...new Set(game.caps.map(c=>c.capType))].map(type=>getCapTypeCached(id,type))),
-      getClock(id),
+      getClock(id), getGameLayout(game),
     ]);
     if (!hand || !otherHand || definitions.some(d=>!d)) throw new Error('Incomplete game snapshot; retrying is safe.');
-    return {hand,otherHand,stack,clock,definitions:new Map(definitions.map(d=>[d!.id,d!]))};
+    return {hand,otherHand,stack,clock,layout,definitions:new Map(definitions.map(d=>[d!.id,d!]))};
   }, minimumTurn);
   return {game,...details};
 }
@@ -178,4 +180,28 @@ export async function getClock(gameId:number) {
 }
 export async function claimTimeout(gameId:number,turn:number,progress?:TransactionProgress) {
   await executeAndWait({contractAddress:ACTIONS,entrypoint:'claim_timeout',calldata:CallData.compile([gameId,turn])},progress);
+}
+
+const boards = new Map<number, PublishedBoard>();
+async function boardCall(entrypoint:string, calldata:(string|number)[] = []) {
+  if (!dojoConfig.contracts.boards) throw new Error('Board registry is unavailable on this deployment');
+  return provider.callContract({contractAddress:dojoConfig.contracts.boards,entrypoint,calldata:CallData.compile(calldata)});
+}
+export async function getPublishedBoard(id:number):Promise<PublishedBoard> {
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('Enter a valid board ID');
+  if (boards.has(id)) return boards.get(id)!;
+  const board = decodeBoard(await boardCall('get_board',[id]));
+  if (!board) throw new Error(`Board #${id} does not exist`);
+  boards.set(id,board); return board;
+}
+export async function getBoardCount() { return Number((await boardCall('get_board_count'))[0]); }
+export async function publishBoard(draft:BoardDraft) {
+  const hash = await executeAndWait({contractAddress:dojoConfig.contracts.boards,entrypoint:'publish',calldata:CallData.compile(encodeBoard(draft))});
+  const id = Number((await boardCall('get_publication',[hash]))[0]);
+  return getPublishedBoard(id);
+}
+async function getGameLayout(game:ChainGame) {
+  if (game.layout !== 255) return getLayout(game.layout);
+  const [id] = await provider.callContract({contractAddress:ACTIONS,entrypoint:'get_game_board',calldata:CallData.compile([game.id])});
+  return (await getPublishedBoard(Number(id))).layout;
 }

@@ -1,0 +1,26 @@
+# CAPS local indexer, tested with Torii 1.8.16. No signing key is needed.
+world_address = "0x064b3825d2b0343b2b33778a2426dcfb54d8968e5078e6ecc140eed10889af99"
+rpc = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9"
+
+[runner]
+query_threads = 2
+indexer_threads = 2
+
+[indexing]
+world_block = 14760367
+namespaces = ["caps"]
+preconfirmed = true
+polling_interval = 500
+max_concurrent_tasks = 16
+batch_chunk_size = 100
+external_contracts = false
+
+[sql]
+cache_size = -64000
+max_connections = 8
+
+[server]
+http_addr = "127.0.0.1"
+http_port = 8081
+http_cors_origins = ["https://caps-jam.vercel.app", "http://localhost:5173", "http://127.0.0.1:5173"]
+raw_sql = false

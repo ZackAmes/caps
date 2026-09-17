@@ -11,6 +11,8 @@
     "./encode": "./src/encode.ts",
     "./passives": "./src/passives.ts",
     "./stack": "./src/stack.ts",
-    "./clock": "./src/clock.ts"
+    "./clock": "./src/clock.ts",
+    "./published-board": "./src/published-board.ts",
+    "./torii": "./src/torii.ts"
   }
 }

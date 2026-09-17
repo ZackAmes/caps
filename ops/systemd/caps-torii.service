@@ -1,0 +1,18 @@
+[Unit]
+Description=CAPS Sepolia Torii indexer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/caps
+ExecStart=%h/.local/share/caps/bin/torii --config %h/caps/contracts/torii_sepolia.toml --db-dir %h/.local/share/caps/torii
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+MemoryHigh=1500M
+MemoryMax=2G
+
+[Install]
+WantedBy=default.target

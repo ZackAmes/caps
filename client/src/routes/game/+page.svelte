@@ -10,6 +10,10 @@
     import { viewerSlot, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
     import botAccount from '../../../../bot/account.public.json';
     import { previewTurn } from '@caps/game-core/preview';
+    import { watchGames, type IndexerStatus } from '@caps/game-core/torii';
+    import defaultBoard from '$lib/dojo/default-board.json';
+    import { getPublishedBoard } from '$lib/dojo/client';
+    import BoardPublisher from '$lib/game/board-publisher.svelte';
     import { createGame, createSoloGame, takeTurn, claimTimeout, type TransactionProgress, getGame, getHand, getStack, getCapTypeCached, findLatestGameForPlayer, getGameSnapshot, getClock, getTurnRecord, transactionState } from '$lib/dojo/client';
     import { connect, isDevMode } from '$lib/dojo/account';
     import { getLayout, goalSlot, isEnergySpace, LAYOUT_DUEL_RING, pathDistance, LAYOUTS, LAYOUT_PERIMETER_5X5, type LayoutConfig } from '@caps/game-core/board';
@@ -75,6 +79,11 @@
     onMount(() => {
         try { if (localStorage.getItem('caps:board-view') === '2d') boardMode = '2d'; } catch { /* Optional preference. */ }
         import('$lib/scene/live-board.svelte').then(module => { ThreeBoard = module.default; }).catch(fallbackBoard);
+        if (defaultBoard.id && BigInt(defaultBoard.world) === BigInt(dojoConfig.worldAddress)) {
+            void getPublishedBoard(defaultBoard.id).then(board => {
+                if (!publishedSelection && selectedLayout === LAYOUT_DUEL_RING && !busy) { publishedSelection = board; selectedLayout = -1; }
+            }).catch(() => { /* Built-in ring remains available if registry RPC is temporarily unavailable. */ });
+        }
         const tick = setInterval(() => clockTick = performance.now(), 250);
         const linked = Number(new URL(location.href).searchParams.get('game'));
         let saved = 0;
@@ -90,6 +99,8 @@
         catch { errorMsg = 'Copy the game link from your address bar.'; }
     }
 
+    let loadedLayout = $state<LayoutConfig | null>(null);
+    let publishedSelection = $state<import('@caps/game-core/published-board').PublishedBoard | null>(null);
     let opponent = $state('');
     let selectedLayout = $state<number>(LAYOUT_DUEL_RING);
     let gameIdInput = $state('1');
@@ -97,8 +108,9 @@
 
     let clockSample = $state<{clock:GameClock; receivedAt:number} | null>(null);
     let clockTick = $state(0);
-    let clockTimes = $derived(clockSample && game ? clockRemaining(clockSample.clock, game.turnCount, game.over,
-        clockSample.clock.chainTime + Math.max(0, clockTick - clockSample.receivedAt) / 1000) : null);
+    let frozenClock = $state<[number, number] | null>(null);
+    let clockTimes = $derived(frozenClock ?? (clockSample && game ? clockRemaining(clockSample.clock, game.turnCount, game.over,
+        clockSample.clock.chainTime + Math.max(0, clockTick - clockSample.receivedAt) / 1000) : null));
     let timedOut = $derived(!!game?.over && !!clockSample?.clock.enabled && clockSample.clock.timedOutSlot < 2);
 
     let hand = $state<ChainHand | null>(null);
@@ -119,6 +131,7 @@
     let pendingSubmission = $state<{gameId:number; turn:number; hash:string; confirmed:boolean} | null>(null);
     let syncStage = $state<'idle'|'submitting'|'confirming'|'syncing'>('idle');
     let syncError = $state<string | null>(null);
+    let indexerStatus = $state<IndexerStatus>('offline');
     let lastSynced = $state<string>('');
     let loadEpoch = 0, submissionEpoch = 0, historyEpoch = 0;
     let historyRecords = $state<TurnRecord[]>([]);
@@ -167,7 +180,7 @@
         clockTimes !== null && clockTimes[game.turnCount % 2] <= 0 && !committing && !pendingForGame && busy === null);
 
     let otherHand = $derived(game && mySlot === game.turnCount % 2 ? opponentHand : hand);
-    let activeLayout = $derived<LayoutConfig>(getLayout(game ? game.layout : selectedLayout));
+    let activeLayout = $derived<LayoutConfig>(game ? loadedLayout ?? getLayout(LAYOUT_DUEL_RING) : publishedSelection?.layout ?? getLayout(selectedLayout));
     let art = $derived(boardArt(activeLayout));
     let isSolo = $derived<boolean>(!!game && game.player1 === game.player2);
 
@@ -570,8 +583,8 @@
         if (!account) { errorMsg = 'Connect first'; return; }
         busy = 'Creating game…';
         try {
-            if (opponentAddress) await createGame(opponentAddress, selectedLayout);
-            else await createSoloGame(selectedLayout);
+            if (opponentAddress) await createGame(opponentAddress, selectedLayout, publishedSelection?.id);
+            else await createSoloGame(selectedLayout, publishedSelection?.id);
             busy = 'Finding your game…';
             const id = await findLatestGameForPlayer(account);
             if (id === null) {
@@ -608,9 +621,10 @@
             onPointerCancel();
             queuedActions = []; selectedCapId = null; hoveredCapId = null; abilityTargetMode = false; stackTargetMode = false;
             capDefMap = snapshot.definitions; pendingStack = snapshot.stack;
+            loadedLayout = snapshot.layout; frozenClock = null;
             hand = snapshot.hand; opponentHand = snapshot.otherHand; clockSample = snapshot.clock; game = nextGame;
             if (submissionHasLanded(pendingForGame, game.turnCount)) {
-                pendingSubmission = null; syncStage = 'idle'; submissionEpoch++;
+                pendingSubmission = null; frozenClock = null; syncStage = 'idle'; submissionEpoch++;
             }
             /* Loading an old match must not replace the new-game map preference. */ resumeId = id; gameIdInput = String(id); linkCopied = false;
             lastSynced = new Date().toLocaleTimeString(); syncError = null; errorMsg = null;
@@ -636,7 +650,12 @@
     $effect(() => {
         const id = game?.id;
         if (!id) return;
-        let cancelled = false, checking = false;
+        let cancelled = false, checking = false, hintedTurn = -1, hintRetries = 0;
+        let updateTimer: ReturnType<typeof setTimeout> | undefined;
+        function scheduleCheck(ms = 100) {
+            clearTimeout(updateTimer);
+            updateTimer = setTimeout(() => { void check(); }, ms);
+        }
         const current = () => !cancelled && game?.id === id;
         async function check() {
             if (checking || !current() || committing || busy) return;
@@ -647,7 +666,7 @@
                     const receipt = await deadline(transactionState(pending.hash));
                     if (!current()) return;
                     if (receipt === 'reverted') {
-                        pendingSubmission = null; syncStage = 'idle'; submissionEpoch++;
+                        pendingSubmission = null; frozenClock = null; syncStage = 'idle'; submissionEpoch++;
                         errorMsg = 'The transaction reverted. Your plan is still here; refresh before trying again.';
                     } else if (receipt === 'confirmed') {
                         pendingSubmission = {...pending, confirmed:true}; syncStage = 'syncing';
@@ -665,21 +684,36 @@
                     else { clockSample = sample; lastSynced = new Date().toLocaleTimeString(); syncError = null; }
                 }
             } catch (error) { if (current()) syncError = error instanceof Error ? error.message : String(error); }
-            finally { checking = false; }
+            finally {
+                checking = false;
+                // A preconfirmed notification can precede the RPC snapshot. Retry briefly,
+                // then let the ordinary polling fallback recover without a request storm.
+                if (current() && hintedTurn > (game?.turnCount ?? -1) && hintRetries < 3) scheduleCheck([300, 1000, 2500][hintRetries++]);
+            }
         }
+        const stopIndexer = watchGames(dojoConfig.toriiUrl, {
+            gameId: id,
+            onGame: next => {
+                if (!current() || (next.turn <= (game?.turnCount ?? -1) && next.over === game?.over)) return;
+                hintedTurn = Math.max(hintedTurn, next.turn); hintRetries = 0; scheduleCheck();
+            },
+            onStatus: next => { indexerStatus = next; if (next === 'live') scheduleCheck(); },
+        });
         const timer = setInterval(check, 5000);
         const visible = () => { if (document.visibilityState === 'visible') void check(); };
         document.addEventListener('visibilitychange', visible);
-        return () => { cancelled = true; clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
+        return () => { cancelled = true; stopIndexer(); clearTimeout(updateTimer); clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
     });
 
     async function commitTurn(claim = false) {
         if (!game || (claim ? !canClaimTimeout : !canAct())) return;
         const id = game.id, turn = game.turnCount, attempt = ++submissionEpoch;
+        frozenClock = clockTimes ? [...clockTimes] as [number, number] : null;
         errorMsg = null; syncError = null; committing = true; syncStage = 'submitting';
         try {
             const progress: TransactionProgress = (stage, hash) => {
                 if (attempt !== submissionEpoch) return;
+                if (!frozenClock && clockTimes) frozenClock = [...clockTimes] as [number, number];
                 pendingSubmission = {gameId:id,turn,hash,confirmed:stage === 'syncing'};
                 syncStage = stage;
             };
@@ -687,7 +721,7 @@
             await loadGame(id, () => game?.id === id, turn + 1);
         } catch (error) {
             syncError = error instanceof Error ? error.message : String(error);
-            if (!pendingSubmission) { errorMsg = syncError; syncStage = 'idle'; }
+            if (!pendingSubmission) { frozenClock = null; errorMsg = syncError; syncStage = 'idle'; }
         } finally { committing = false; }
     }
 
@@ -730,11 +764,12 @@
             {:else}
                 {#if resumeId}<button class="resume-game" onclick={() => { gameIdInput = String(resumeId); void handleLoad(); }} disabled={busy !== null}><span>Continue game <b>#{resumeId}</b></span><span>↗</span></button>{/if}
                 <section class="menu-card new-match" aria-label="New match">
-                    <div class="field"><label for="layout-select">Your battlefield</label><select id="layout-select" bind:value={selectedLayout} disabled={busy !== null}>{#each Object.values(LAYOUTS) as l}<option value={l.id}>{l.name}</option>{/each}</select><p class="hint">{getLayout(selectedLayout).description}</p></div>
+                    <div class="field"><label for="layout-select">Your battlefield</label><select id="layout-select" bind:value={selectedLayout} onchange={() => { if (selectedLayout >= 0) publishedSelection = null; }} disabled={busy !== null}>{#if publishedSelection}<option value={-1}>{publishedSelection.definition.name} · #{publishedSelection.id}</option>{/if}{#each Object.values(LAYOUTS) as l}<option value={l.id}>{l.name}</option>{/each}</select><p class="hint">{publishedSelection ? `Community board #${publishedSelection.id}: ${publishedSelection.definition.name}` : getLayout(selectedLayout).description}</p></div>
                     <button class="primary big play-bot" onclick={() => createAndLoad(botAccount.address)} disabled={busy !== null}><span>Play the bot<small>A quick tactical challenge</small></span><span aria-hidden="true">→</span></button>
                     <button class="solo-button" onclick={handleCreateSolo} disabled={busy !== null}>Practice · control both sides</button>
-                    <p class="hint">The clock starts when the match is created. The bot checks for turns about every 15 seconds.</p>
+                    <p class="hint">The clock starts when the match is created. The bot responds to live updates, with periodic checks as a fallback.</p>
                 </section>
+                <BoardPublisher disabled={busy !== null} onselect={(board) => { publishedSelection = board; selectedLayout = -1; }} />
                 <details class="menu-card"><summary>Challenge a friend <span>＋</span></summary><div class="menu-content"><p class="hint">Enter their account address, then share the game link.</p><div class="field"><label for="opp">Opponent address</label><input id="opp" bind:value={opponent} placeholder="0x…" autocomplete="off" spellcheck="false" /></div><button onclick={handleCreate} disabled={!opponent.trim() || busy !== null}>Create challenge →</button></div></details>
                 <details class="menu-card"><summary>Open a game <span>↗</span></summary><div class="menu-content"><div class="field"><label for="game-id">Game number</label><div class="field row"><input id="game-id" bind:value={gameIdInput} type="number" min="1" inputmode="numeric" placeholder="Game number" /><button onclick={handleLoad} disabled={busy !== null}>Open</button></div></div></div></details>
                 <details class="menu-card"><summary>Account & connection <span>⌁</span></summary><div class="menu-content"><p class="hint">{status} · Sepolia{devMode ? ' · shared test account' : ''}</p><button onclick={copyAddress}>{addrCopied ? 'Address copied' : 'Copy account address'}</button><p class="hint">If a transaction needs gas, add free Sepolia STRK to this address and retry.</p><a class="faucet-link" href="https://starknet-faucet.vercel.app/" target="_blank" rel="noopener noreferrer">Get test STRK ↗</a></div></details>
@@ -744,15 +779,15 @@
         <section class="play-screen" aria-label="CAPS game">
             <div class="play-top"><header class="play-hud">
                 <button aria-label="Game menu" onclick={() => overlay = 'menu'}>☰</button>
-                <span class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
+                <span title={frozenClock ? "Clock display paused while confirming; chain time is authoritative" : ""} class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
                 <span class="hud-energy" title="Your energy">⚡ {isMyTurn() ? remainingEnergy : mySlot === 0 ? game.p1Energy : game.p2Energy}</span>
                 <button class:has-effects={!!preview?.stack.entries.length} aria-label={`Ability stack: ${preview?.stack.entries.length ?? 0} effects`} onclick={() => overlay = 'stack'}>◷ {preview?.stack.entries.length ?? 0}</button>
                 <button aria-label="Opponent moves and turn history" onclick={() => overlay = 'history'}>↶</button>
             </header>
-            <div class="clock-strip" aria-label="Game clocks: two minutes plus ten seconds per turn">
+            <div class="clock-strip" aria-label={frozenClock ? "Game clocks paused on screen while confirming" : "Game clocks: two minutes plus ten seconds per turn"}>
                 {#each [mySlot ?? 0, 1 - (mySlot ?? 0)] as slot}
-                    <span class:running={!game.over && game.turnCount % 2 === slot} class:low={clockTimes !== null && clockTimes[slot] < 20}>
-                        <small>{isSolo || mySlot === null ? `P${slot + 1}` : slot === mySlot ? 'You' : 'Opponent'}</small>
+                    <span class:running={!frozenClock && !game.over && game.turnCount % 2 === slot} class:low={clockTimes !== null && clockTimes[slot] < 20}>
+                        <small>{frozenClock ? '⏸ ' : ''}{isSolo || mySlot === null ? `P${slot + 1}` : slot === mySlot ? 'You' : 'Opponent'}</small>
                         <b aria-label={`${isSolo ? `Player ${slot + 1}` : slot === mySlot ? 'Your' : 'Opponent'} time ${clockLabel(clockTimes?.[slot])}`}>{clockLabel(clockTimes?.[slot])}</b>
                     </span>
                 {/each}
@@ -924,7 +959,7 @@
 
                         <TurnHistory records={historyRecords} definitions={capDefMap} viewer={mySlot} loading={historyLoading} error={historyError} hasOlder={historyCursor > 0} onolder={() => { void loadHistory(game?.id, game?.turnCount, true); }} />
                     {:else if overlay === 'menu'}
-                        <div class="match-summary"><span class="eyebrow">{isSolo ? 'PRACTICE' : 'HEAD TO HEAD'}</span><h2>{activeLayout.name}</h2><p>Turn {game.turnCount + 1} · 2 min + 10 sec / turn</p></div>
+                        <p class="hint">{indexerStatus === 'live' ? 'Live updates connected' : indexerStatus === 'connecting' ? 'Connecting live updates · polling active' : 'Live updates unavailable · polling active'}</p><div class="match-summary"><span class="eyebrow">{isSolo ? 'PRACTICE' : 'HEAD TO HEAD'}</span><h2>{activeLayout.name}</h2><p>Turn {game.turnCount + 1} · 2 min + 10 sec / turn</p></div>
                         <button class="primary" onclick={closeOverlay}>Back to board →</button>
                         <div class="menu-actions"><button onclick={copyGameLink}>{linkCopied ? 'Link copied ✓' : 'Share game ↗'}</button><button onclick={handleLoad} disabled={committing || busy !== null}>Refresh ↻</button></div>
                         {#if errorMsg || syncError}<p role="alert">{errorMsg ?? syncError}</p>{/if}
@@ -932,7 +967,7 @@
                         {#if boardNotice}<p>{boardNotice}</p>{/if}
                         <details class="menu-card"><summary>Clocks & match state <span>◷</span></summary><div class="menu-content">
                             <div class="match-stats"><span>P1<b>{clockLabel(clockTimes?.[0])}</b><small>⚡ {game.p1Energy}</small></span><span>P2<b>{clockLabel(clockTimes?.[1])}</b><small>⚡ {game.p2Energy}</small></span></div>
-                            <p class="hint">Only the active player’s clock runs. A completed turn adds 10 seconds. Time is checked when the transaction executes; network confirmation time counts.</p>
+                            <p class="hint">Only the active player’s clock runs. A completed turn adds 10 seconds. Time is checked when the transaction executes; time before execution counts. The display pauses during confirmation, then synchronizes with the chain.</p>
                             {#if !clockSample?.clock.enabled}<p class="hint">This older match starts with fresh clocks on its next successful turn.</p>{/if}
                             {#if timedOut}<p>P{clockSample!.clock.timedOutSlot + 1} ran out of time.</p>{/if}
                             {#if canClaimTimeout}<button onclick={() => { closeOverlay(); void commitTurn(true); }}>Claim timeout win</button>{/if}

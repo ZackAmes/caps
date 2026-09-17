@@ -15,6 +15,7 @@ export interface LayoutConfig {
   energySpaces?: Position[];
   /** Rendering waypoints only: from/to form a single movement edge. */
   connections?: BoardConnection[];
+  artwork?: {width:number;height:number;spots:{at:Position;position:Position}[];routes:{from:Position;to:Position;via:Position[]}[]};
   isWalkable(x: number, y: number): boolean;
   neighbors(position: Position): Position[];
 }

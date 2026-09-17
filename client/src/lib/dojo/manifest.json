@@ -1,6 +1,6 @@
 {
   "world": {
-    "class_hash": "0x613551abceb2b37073b1149bb862ea70cf029981ce1ca47e9dd7c7ab97cb65d",
+    "class_hash": "0x381899226c066a0262f45d6ab815f89818e0874ec3e66cdf72b5e92d8db4680",
     "address": "0x64b3825d2b0343b2b33778a2426dcfb54d8968e5078e6ecc140eed10889af99",
     "seed": "caps-path-stack-v4-2026-09-08",
     "name": "CAPS — Paths and Abilities",
@@ -34,11 +34,13 @@
   "contracts": [
     {
       "address": "0x6f466df359053acd6186676c69a10b13b360d35b78b5982c64506921946973",
-      "class_hash": "0x431df92c399e48550f80edf39dcaca6bb7121962657c0f2283e2b2f97321893",
+      "class_hash": "0xe0f4c10fb2f5e8d8be818f1e0f36e0d83e8ddef2eb7d6627dcf42f87863dc3",
       "init_calldata": [],
       "tag": "caps-actions",
       "selector": "0x482dc9f44e8c68f3ef3ab58497e0d8e446ad2581a5544512fbaebef3af3ccbc",
       "systems": [
+        "create_game_with_board",
+        "create_solo_game_with_board",
         "claim_timeout",
         "take_turn_if_current",
         "register_set",
@@ -51,8 +53,19 @@
       ]
     },
     {
+      "address": "0x6654dcc504c93cc0f63743182e3905582ed12f8fdee5262eabef3b25b34668c",
+      "class_hash": "0x63686c301cb385450a5757d8f6d1768e8b35fce736f20e0ba75f272764db810",
+      "init_calldata": [],
+      "tag": "caps-boards",
+      "selector": "0x384404bb328e84d5e6f07ef7c159412fd282e113943ee5196e2d5604ecaadcd",
+      "systems": [
+        "publish",
+        "upgrade"
+      ]
+    },
+    {
       "address": "0x628f94bf4027aa93e9a10813d789f0b11aab821ee65369b4cf09a14d25248cb",
-      "class_hash": "0x41220dfaeb33904554afc1c60e68970dc69f16854bb361c6b1fb85e50027266",
+      "class_hash": "0x1e9170af76b9465d32630470371257dff186aa2d6836421db7e3e796d648255",
       "init_calldata": [],
       "tag": "caps-set_zero",
       "selector": "0x35ce53c0ff5c6ffb239bb347c5287062ae627c62c39204363d9153ba72a9377",
@@ -81,9 +94,60 @@
           "key": false
         }
       ],
-      "class_hash": "0x32210b9cb50cd0d27b8fb293159199861cf5d3bfa8b102badf829392c56ea5a",
+      "class_hash": "0x7aff64dc1b53c0dd7104c41259db173ccbc3ae3bdbf1a8c0b5863d63dd40f7c",
       "tag": "caps-AbilityStack",
       "selector": "0x545130903a4bae49a858e1a80f7b3f5affd37286da10decab0bff5b3bf509fc"
+    },
+    {
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "packed",
+          "type": "core::array::Array::<core::integer::u128>",
+          "key": false
+        }
+      ],
+      "class_hash": "0x1ed22937b37ed240c85f0542cb038713877a24b1fd9e6c034d572048f166f0e",
+      "tag": "caps-BoardDistances",
+      "selector": "0x31fa5593f211455bc9a5eb58c841cb9f4b8d017acec3b2bc191d0fb6c95b8d5"
+    },
+    {
+      "members": [
+        {
+          "name": "transaction",
+          "type": "core::felt252",
+          "key": true
+        },
+        {
+          "name": "board_id",
+          "type": "core::integer::u64",
+          "key": false
+        }
+      ],
+      "class_hash": "0x671ee6172aa2f9ab3bb463e812d7651ec4650ac6bac8d1fb20d33c995694f0",
+      "tag": "caps-BoardPublication",
+      "selector": "0x6495e973db47b42ae3a4f33f72c98e130c7a91b0997035bcaa862d6fa846301"
+    },
+    {
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u8",
+          "key": true
+        },
+        {
+          "name": "count",
+          "type": "core::integer::u64",
+          "key": false
+        }
+      ],
+      "class_hash": "0x3e511907d40c729b921744bc337bbbe78f17488ed826a034f56300209b4b655",
+      "tag": "caps-BoardRegistry",
+      "selector": "0x1631391b4d7645ab2d2cf00b84391d26f37243fd62ae38faa84e2ecb657785e"
     },
     {
       "members": [
@@ -138,7 +202,7 @@
           "key": false
         }
       ],
-      "class_hash": "0x386b70fbad70fdfb1b4c287138e14b0870e8cb0461ff7692d6e95331a982a2",
+      "class_hash": "0x9aeae46f991de4c70ac560ce969a2749e89d8c0da534857a9a6bc25894c169",
       "tag": "caps-Cap",
       "selector": "0x4666b6027dbc8acd7fcac4489890ab6bb23d5b080ad517c26a6f8b3b551c37f"
     },
@@ -170,7 +234,7 @@
           "key": false
         }
       ],
-      "class_hash": "0xbdd42e686ec0fa5994b6b6501840849995130014b1d73c9025c2eecb13ed75",
+      "class_hash": "0x11fb3735a1f9f3be4f2ca31e404d0e14da5147bfb967f5334e21c06536482e",
       "tag": "caps-Effect",
       "selector": "0x224ce3db691874cd4a155cc1059d391c9d2cabec2e98b100233ce6365221dd8"
     },
@@ -257,9 +321,26 @@
           "key": false
         }
       ],
-      "class_hash": "0x382e9ad801fcbc6e777be1b8dc0584678cb7a4c3c2b39015ed85422c3e21377",
+      "class_hash": "0x449b280d1b972794ed1a3457aebe8fb2bdd1495367c064dfc8bc482bc6e1ece",
       "tag": "caps-Game",
       "selector": "0xe9697c6c427792aaa8a422a17897c4b838d7d6c76261f43cce21228c294477"
+    },
+    {
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "board_id",
+          "type": "core::integer::u64",
+          "key": false
+        }
+      ],
+      "class_hash": "0x3c1a8f2022ce61a795551642751ade3218f2fb796d51021b85c592542475c7e",
+      "tag": "caps-GameBoard",
+      "selector": "0x2054a3898f7caa1064b6c4da02d3d6b3dbb2bfc398d18c78eeb5b6fafab9ea9"
     },
     {
       "members": [
@@ -294,7 +375,7 @@
           "key": false
         }
       ],
-      "class_hash": "0x5a0a68d7eaa5251e305ba88add090f1da934031aab2a1de33722d21cbb835ef",
+      "class_hash": "0x4234924d9f0c804f336a0e8d6e38607d7bdc2ff5d885faf1c6c0ea0c0038e01",
       "tag": "caps-GameClock",
       "selector": "0x74129a5c127e8cef6601b67b121330c1dcd3e8b0d6787000af59aeebdd97395"
     },
@@ -321,7 +402,7 @@
           "key": false
         }
       ],
-      "class_hash": "0x4d0876dfb01191cbf604ba30a0ffd1de6fa3533bffd14b0a7d7ee04ad3238d6",
+      "class_hash": "0x571cb1215058a1e83d59f0ec240fd1f713466845ee9fb86abb9321ac82a7d",
       "tag": "caps-Global",
       "selector": "0x70e88df3f805a04831adfefc6e7231dc9a65cce7920bf65bcb51e6f0bf729c4"
     },
@@ -348,9 +429,31 @@
           "key": false
         }
       ],
-      "class_hash": "0x4d01f3f74e26857245f72b0418e614b1c65023c6955f4cbf1f14d1ffd6bd8a8",
+      "class_hash": "0x6c25f980190974481530fd6c7951667ad371cedcc2f52d17cb35c3614394ad2",
       "tag": "caps-Hand",
       "selector": "0x4bf7430e1b86c5f71757682346d73dd235da9b4f051251ae9af1e0423ba304a"
+    },
+    {
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64",
+          "key": true
+        },
+        {
+          "name": "creator",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "key": false
+        },
+        {
+          "name": "definition",
+          "type": "caps::models::board::BoardDefinition",
+          "key": false
+        }
+      ],
+      "class_hash": "0x7101aa166bd405a6f2f0b07dde385700f2c000dbd0041ab67dd85d65f722c67",
+      "tag": "caps-PublishedBoard",
+      "selector": "0x3bc0be2000db694e687dab234bab04717fef6224e68ae4d124e88fe8468f83"
     },
     {
       "members": [
@@ -380,7 +483,7 @@
           "key": false
         }
       ],
-      "class_hash": "0x6778f81bdd0027d751bd00e13fad8db46f21e80efd9932b8b7b7edf581ba2e8",
+      "class_hash": "0x1e938d5ad16dddb79476875f691011a0e3bad25dfb93fea3e5fb9c25a2b89bd",
       "tag": "caps-Set",
       "selector": "0x5040dc1ca1ab78c673c858a24c5ea02dd0ed6ba32750672e582b101b3399235"
     },
@@ -447,7 +550,7 @@
           "key": false
         }
       ],
-      "class_hash": "0x6b9f336daa388d40ad4598b65232f03509f2f52e7e248a01dcf82ba72b28739",
+      "class_hash": "0x5591a07d1a6ad38de446558133515c7b406c3897ebddef6fce0da33b6ec80fa",
       "tag": "caps-TurnRecord",
       "selector": "0x5b1094a1b78af3afe75fb3b37ccf996a3e3d3dc3cc6c3fb9c15067daa5d3a8e"
     }
@@ -455,6 +558,298 @@
   "events": [],
   "external_contracts": [],
   "abis": [
+    {
+      "type": "struct",
+      "name": "caps::logic::track::BoardGeometry",
+      "members": [
+        {
+          "name": "legacy",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "custom",
+          "type": "core::bool"
+        },
+        {
+          "name": "stride",
+          "type": "core::integer::u32"
+        },
+        {
+          "name": "width",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "height",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "p1",
+          "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "p2",
+          "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "spots",
+          "type": "core::array::Span::<caps::models::board::BoardSpot>"
+        },
+        {
+          "name": "packed",
+          "type": "core::array::Span::<core::integer::u128>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardDefinition",
+      "members": [
+        {
+          "name": "name",
+          "type": "core::byte_array::ByteArray"
+        },
+        {
+          "name": "width",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "height",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "view_width",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "view_height",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "p1_goal",
+          "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "p2_goal",
+          "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "spots",
+          "type": "core::array::Array::<caps::models::board::BoardSpot>"
+        },
+        {
+          "name": "edges",
+          "type": "core::array::Array::<caps::models::board::BoardEdge>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardDistances",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "packed",
+          "type": "core::array::Array::<core::integer::u128>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardDistancesValue",
+      "members": [
+        {
+          "name": "packed",
+          "type": "core::array::Array::<core::integer::u128>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardEdge",
+      "members": [
+        {
+          "name": "from",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "to",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "via",
+          "type": "core::array::Array::<caps::models::board::VisualPoint>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardPublication",
+      "members": [
+        {
+          "name": "transaction",
+          "type": "core::felt252"
+        },
+        {
+          "name": "board_id",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardPublicationValue",
+      "members": [
+        {
+          "name": "board_id",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardRegistry",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "count",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardRegistryValue",
+      "members": [
+        {
+          "name": "count",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::BoardSpot",
+      "members": [
+        {
+          "name": "at",
+          "type": "caps::models::game::Vec2"
+        },
+        {
+          "name": "position",
+          "type": "caps::models::board::VisualPoint"
+        },
+        {
+          "name": "energy",
+          "type": "core::bool"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::GameBoard",
+      "members": [
+        {
+          "name": "game_id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "board_id",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::GameBoardValue",
+      "members": [
+        {
+          "name": "board_id",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::PublishedBoard",
+      "members": [
+        {
+          "name": "id",
+          "type": "core::integer::u64"
+        },
+        {
+          "name": "creator",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "definition",
+          "type": "caps::models::board::BoardDefinition"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::PublishedBoardValue",
+      "members": [
+        {
+          "name": "creator",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "definition",
+          "type": "caps::models::board::BoardDefinition"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "caps::models::board::VisualPoint",
+      "members": [
+        {
+          "name": "x",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "y",
+          "type": "core::integer::u16"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "caps::models::board::m_BoardDistances::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "caps::models::board::m_BoardPublication::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "caps::models::board::m_BoardRegistry::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "caps::models::board::m_GameBoard::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "caps::models::board::m_PublishedBoard::Event",
+      "kind": "enum",
+      "variants": []
+    },
     {
       "type": "struct",
       "name": "caps::models::cap::Cap",
@@ -2179,6 +2574,58 @@
         },
         {
           "type": "function",
+          "name": "get_game_board",
+          "inputs": [
+            {
+              "name": "game_id",
+              "type": "core::integer::u64"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "create_game_with_board",
+          "inputs": [
+            {
+              "name": "p2",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "board_id",
+              "type": "core::integer::u64"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "create_solo_game_with_board",
+          "inputs": [
+            {
+              "name": "board_id",
+              "type": "core::integer::u64"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
           "name": "get_clock",
           "inputs": [
             {
@@ -2459,6 +2906,108 @@
       ]
     },
     {
+      "type": "interface",
+      "name": "caps::systems::boards::IBoards",
+      "items": [
+        {
+          "type": "function",
+          "name": "get_geometry",
+          "inputs": [
+            {
+              "name": "layout",
+              "type": "core::integer::u8"
+            },
+            {
+              "name": "board_id",
+              "type": "core::integer::u64"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "caps::logic::track::BoardGeometry"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "publish",
+          "inputs": [
+            {
+              "name": "definition",
+              "type": "caps::models::board::BoardDefinition"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_board",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "core::integer::u64"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::option::Option::<caps::models::board::PublishedBoard>"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_board_count",
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_publication",
+          "inputs": [
+            {
+              "name": "transaction",
+              "type": "core::felt252"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "view"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "caps::systems::boards::boards::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "UpgradeableEvent",
+          "type": "dojo::contract::components::upgradeable::upgradeable_cpt::Event",
+          "kind": "nested"
+        },
+        {
+          "name": "WorldProviderEvent",
+          "type": "dojo::contract::components::world_provider::world_provider_cpt::Event",
+          "kind": "nested"
+        }
+      ]
+    },
+    {
       "type": "constructor",
       "name": "constructor",
       "inputs": []
@@ -2470,6 +3019,16 @@
         {
           "name": "snapshot",
           "type": "@core::array::Array::<(core::felt252, dojo::meta::introspect::Ty)>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "core::array::Span::<caps::models::board::BoardSpot>",
+      "members": [
+        {
+          "name": "snapshot",
+          "type": "@core::array::Array::<caps::models::board::BoardSpot>"
         }
       ]
     },
@@ -2560,6 +3119,16 @@
         {
           "name": "snapshot",
           "type": "@core::array::Array::<core::felt252>"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "core::array::Span::<core::integer::u128>",
+      "members": [
+        {
+          "name": "snapshot",
+          "type": "@core::array::Array::<core::integer::u128>"
         }
       ]
     },
@@ -2686,6 +3255,20 @@
         {
           "name": "Some",
           "type": "(caps::models::game::Hand, core::array::Span::<core::integer::u64>)"
+        },
+        {
+          "name": "None",
+          "type": "()"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "core::option::Option::<caps::models::board::PublishedBoard>",
+      "variants": [
+        {
+          "name": "Some",
+          "type": "caps::models::board::PublishedBoard"
         },
         {
           "name": "None",
