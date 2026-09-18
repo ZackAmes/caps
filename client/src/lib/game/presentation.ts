@@ -1,5 +1,5 @@
 import { pathDistance, type LayoutConfig } from '@caps/game-core/board';
-import type { AbilityStack, ChainGame, StackEntry, ChainCap } from '@caps/game-core/types';
+import type { AbilityStack, ChainGame, StackEntry, PieceSnapshot } from '@caps/game-core/types';
 
 export function viewerSlot(game: ChainGame, account: string | null): number | null {
     if (!account) return null;
@@ -39,7 +39,7 @@ export function effectTiming(entry: StackEntry, stack: AbilityStack, turn: numbe
 }
 
 /** Target geometry independent of current occupancy, useful for previewing an effect. */
-export function impactFootprint(entry: StackEntry | undefined, caps: ChainCap[], layout: LayoutConfig): Set<string> {
+export function impactFootprint(entry: StackEntry | undefined, caps: PieceSnapshot[], layout: LayoutConfig): Set<string> {
     const cells = new Set<string>();
     if (!entry) return cells;
     const s = entry.impact.selection;

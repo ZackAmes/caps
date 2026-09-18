@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { BoardCue } from '$lib/game/motion';
     import { onMount } from 'svelte';
     import { pickBoardCell } from '$lib/game/picking';
     import type { PerspectiveCamera } from 'three';
@@ -7,9 +8,9 @@
     import type { LayoutConfig } from '@caps/game-core/board';
     import type { AbilityStack, ChainCap, CapTypeDef } from '@caps/game-core/types';
 
-    let { layout, caps, viewer, definitions, selectedId, targets, focusedCells, stack, onhover, onfailure, onpickready, onpointerdown, onpointermove, onpointerup, onpointercancel }: {
+    let { layout, caps, viewer, definitions, selectedId, targets, focusedCells, stack, cues, onhover, onfailure, onpickready, onpointerdown, onpointermove, onpointerup, onpointercancel }: {
         viewer: number | null; layout: LayoutConfig; caps: ChainCap[]; definitions: Map<number, CapTypeDef>;
-        selectedId: number | null; targets: Map<string, string>; focusedCells: Set<string>; stack: AbilityStack;
+        selectedId: number | null; targets: Map<string, string>; focusedCells: Set<string>; stack: AbilityStack; cues: BoardCue[];
         onpickready:(pick:((x:number,y:number)=>{x:number;y:number}|null)|null)=>void;
         onpointerdown:(e:PointerEvent)=>void; onpointermove:(e:PointerEvent)=>void; onpointerup:(e:PointerEvent)=>void; onpointercancel:()=>void; onfailure: () => void; onhover:(id:number|null)=>void;
     } = $props();
@@ -26,7 +27,7 @@
 
 <div class="viewport" bind:this={viewport} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} onlostpointercapture={onpointercancel} role="application" aria-label="Interactive game board">
     <Canvas dpr={1.5}>
-        <LiveScene {viewer} {layout} {caps} {definitions} {selectedId} {targets} {focusedCells} {stack} oncamera={(value) => camera = value} {onhover} />
+        <LiveScene {viewer} {layout} {caps} {definitions} {selectedId} {targets} {focusedCells} {stack} {cues} oncamera={(value) => camera = value} {onhover} />
     </Canvas>
 </div>
 

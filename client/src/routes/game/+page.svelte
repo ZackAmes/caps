@@ -5,7 +5,9 @@
     import StackPanel from '$lib/game/StackPanel.svelte';
     import TurnHistory from '$lib/game/TurnHistory.svelte';
     import { actionLabel, square } from '$lib/game/history';
-    import { onMount } from 'svelte';
+    import { onMount, untrack } from 'svelte';
+    import OpponentMove from '$lib/game/OpponentMove.svelte';
+    import { actionCues, resolvedCue, CueLedger, type BoardCue, type TurnNotice } from '$lib/game/motion';
     import { dojoConfig } from '$lib/dojo/config';
     import { viewerSlot, effectTiming, impactFootprint, pieceSymbol } from '$lib/game/presentation';
     import botAccount from '../../../../bot/account.public.json';
@@ -206,7 +208,47 @@
     let canActivateSelected = $derived(!!selectedActor && canAct() && isMyCap(selectedActor) && selectedActor.x !== null && !selectedActor.stunnedTurns && !preview?.usedAbilities.has(selectedActor.id) && remainingEnergy >= (capDefFor(selectedActor)?.abilityCost ?? Infinity));
 
     let focusedCells = $derived(impactFootprint(displayedStack.entries.find(e => e.id === focusedEffectId), simCaps, activeLayout));
-    let latestOpponent = $derived(historyRecords.find(r => isSolo || r.playerSlot !== mySlot));
+    let latestOpponent = $derived(historyRecords.find(r => r.gameId === game?.id && (isSolo || r.playerSlot !== mySlot)));
+    let visualCues = $state<BoardCue[]>([]);
+    let turnNotice = $state<TurnNotice | null>(null);
+    let cueGame = 0, animationFloor = 0, cueLedger = new CueLedger();
+    $effect(() => {
+        const current = game, incoming = remotePreview ? activeIncoming : null, rawIntent = incomingIntent;
+        const plan = queuedActions, records = historyRecords, slot = mySlot, solo = isSolo, layout = activeLayout;
+        const stack = pendingStack;
+        untrack(() => {
+            if (!current || cueGame !== current.id) {
+                cueGame = current?.id ?? 0; animationFloor = current?.turnCount ?? 0;
+                cueLedger = new CueLedger(); visualCues = []; turnNotice = null;
+            }
+            if (!current) return;
+            const cues: BoardCue[] = [];
+            if (incoming) {
+                cues.push(...actionCues(current.id,incoming.turn,incoming.actions,current.caps,stack.entries));
+                turnNotice = {gameId:current.id,turn:incoming.turn,playerSlot:incoming.turn%2,actions:incoming.actions,before:current.caps,phase:'pending'};
+            } else if (plan.length) cues.push(...actionCues(current.id,current.turnCount,plan,current.caps,stack.entries));
+            // History may arrive after the snapshot. Trigger only turns observed in this
+            // session, and never replay an action already shown from a signed preview.
+            for (const record of records.filter(r => r.gameId === current.id && r.turn >= Math.max(animationFloor,current.turnCount-2))) {
+                cues.push(...actionCues(current.id,record.turn,record.actions,record.before,record.stackBefore));
+                const impactPieces = record.after.map(p => p.x === null || p.dead ? record.before.find(before => before.id === p.id) ?? p : p);
+                for (const entry of record.resolved) cues.push(resolvedCue(current.id,record.turn,entry,impactPieces,layout));
+            }
+            const opponent = records.find(r => r.gameId === current.id && (solo || r.playerSlot !== slot));
+            if (opponent && (!turnNotice || opponent.turn >= turnNotice.turn)) turnNotice = {...opponent,phase:'confirmed'};
+            if (turnNotice?.phase === 'pending' && !incoming) {
+                turnNotice = {...turnNotice,phase:current.turnCount > turnNotice.turn ? 'confirmed' :
+                    rawIntent?.status === 2 || current.over ? 'cancelled' : 'expired'};
+            }
+            const fresh = cueLedger.fresh(cues);
+            if (fresh.length) visualCues = [...visualCues,...fresh].slice(-12);
+        });
+    });
+    $effect(() => {
+        if (!visualCues.length) return;
+        const timer = setTimeout(() => visualCues = [],1200);
+        return () => clearTimeout(timer);
+    });
     let sceneTargets = $derived.by(() => {
         const cap = capById(drag?.capId ?? selectedCapId ?? -1);
         if (!cap || !canAct()) return new Map<string, string>();
@@ -812,7 +854,7 @@
                 <button aria-label="Game menu" onclick={() => overlay = 'menu'}>☰</button>
                 <span title={frozenClock ? "Clock display paused while confirming; chain time is authoritative" : ""} class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : remotePreview ? 'Move pending' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
                 <span class="hud-energy" title="Your energy">⚡ {isMyTurn() ? remainingEnergy : mySlot === 0 ? game.p1Energy : game.p2Energy}</span>
-                <button class:has-effects={!!displayedStack.entries.length} aria-label={`Ability stack: ${displayedStack.entries.length} effects`} onclick={() => overlay = 'stack'}>◷ {displayedStack.entries.length}</button>
+                <button class:ability-pulse={visualCues.some(c => c.kind === 'ability' || c.kind === 'negate' || c.kind === 'resolve')} class:has-effects={!!displayedStack.entries.length} aria-label={`Ability stack: ${displayedStack.entries.length} effects`} onclick={() => overlay = 'stack'}>◷ {displayedStack.entries.length}</button>
                 <button aria-label="Opponent moves and turn history" onclick={() => overlay = 'history'}>↶</button>
             </header>
             <div class="clock-strip" aria-label={frozenClock ? "Game clocks paused on screen while confirming" : "Game clocks: two minutes plus ten seconds per turn"}>
@@ -822,12 +864,14 @@
                         <b aria-label={`${isSolo ? `Player ${slot + 1}` : slot === mySlot ? 'Your' : 'Opponent'} time ${clockLabel(clockTimes?.[slot])}`}>{clockLabel(clockTimes?.[slot])}</b>
                     </span>
                 {/each}
-            </div></div>
+            </div>
+            {#if turnNotice && turnNotice.gameId === game.id}<OpponentMove notice={turnNotice} definitions={capDefMap} viewer={mySlot} solo={isSolo} oninspect={() => overlay = 'history'} />{/if}
+            </div>
             <div class="play-stage">
                 {#if boardMode === '3d'}
                     <svelte:boundary onerror={fallbackBoard}>
                         {#if ThreeBoard}
-                            <ThreeBoard viewer={mySlot} layout={activeLayout} caps={simCaps} definitions={capDefMap} selectedId={drag?.capId ?? selectedCapId} targets={sceneTargets} {focusedCells} stack={displayedStack} onpickready={(pick) => boardPicker = pick} onpointerdown={onPointerDown} onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel} onhover={(id) => { if (!drag) hoveredCapId = id; }} onfailure={fallbackBoard} />
+                            {#key game.id}<ThreeBoard viewer={mySlot} layout={activeLayout} caps={simCaps} definitions={capDefMap} selectedId={drag?.capId ?? selectedCapId} targets={sceneTargets} {focusedCells} stack={displayedStack} cues={visualCues} onpickready={(pick) => boardPicker = pick} onpointerdown={onPointerDown} onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel} onhover={(id) => { if (!drag) hoveredCapId = id; }} onfailure={fallbackBoard} />{/key}
                         {:else}<p class="stage-notice" role="status">Loading board…</p>{/if}
                     </svelte:boundary>
                 {:else}
@@ -869,7 +913,7 @@
                         class:energy-tile={isEnergySpace(activeLayout,x,y)}
                         class:deploy-tile={isDeploy && !occ}
                         class:effect-focus={focusedCells.has(`${x},${y}`)}
-                        class:pending-danger={walkable && !!preview?.stack.entries.some(e => e.impact.kind === 'Damage' && e.impact.selection.kind === 'Row' && e.impact.selection.index === y)}
+                        class:pending-danger={walkable && !!displayedStack.entries.some(e => e.impact.kind === 'Damage' && e.impact.selection.kind === 'Row' && e.impact.selection.index === y)}
                         class:target-move={!!targetInfo && targetInfo.type === 'move'}
                         class:target-fight={!!targetInfo && targetInfo.type === 'fight'}
                         class:target-ability={isAbilityTgt}
@@ -899,6 +943,14 @@
                 <svg class="paths" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     {#each art.segments as edge}
                         <line x1={(edge.from[0]/art.width+0.5)*100} y1={(edge.from[1]/art.height+0.5)*100} x2={(edge.to[0]/art.width+0.5)*100} y2={(edge.to[1]/art.height+0.5)*100} />
+                    {/each}
+                </svg>
+                <svg class="move-feedback" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    {#each visualCues as cue (cue.id)}
+                        {#each cue.cells.filter(([x,y]) => activeLayout.isWalkable(x,y)) as cell}
+                            {@const p = artPosition(art,...cell)}
+                            <ellipse cx={(p[0]/art.width+0.5)*100} cy={(p[1]/art.height+0.5)*100} rx={0.5/art.width*100} ry={0.5/art.height*100} stroke={cue.color} />
+                        {/each}
                     {/each}
                 </svg>
                 <!-- Pieces: absolutely positioned, glide between tiles -->
@@ -967,9 +1019,9 @@
                 <div class="turn-controls">
                     <button aria-label="Undo last planned action" disabled={!canAct() || !queuedActions.length} onclick={() => removeQueuedAction(queuedActions.length - 1)}>↶</button>
                     <span class="action-dots" aria-label={`${preview?.actions ?? 1} normal actions and ${preview?.moves ?? 0} bonus moves remaining`}>{(preview?.actions ?? 1) ? '●' : '○'}{(preview?.moves ?? 0) > 0 ? ` +${preview?.moves}` : ''}</span>
-                    <button class="submit-turn" onclick={() => commitTurn(canClaimTimeout)} disabled={!canAct() && !canClaimTimeout}>{syncStage === 'submitting' ? 'Sending…' : syncStage === 'confirming' ? 'Confirming…' : syncStage === 'syncing' ? 'Updating…' : game.over ? 'Game over' : canClaimTimeout ? 'Claim timeout win →' : !isMyTurn() ? remotePreview ? 'Opponent move · pending' : 'Opponent’s turn' : queuedActions.length ? 'End turn →' : 'Pass →'}</button>
+                    <button class="submit-turn" onclick={() => commitTurn(canClaimTimeout)} disabled={!canAct() && !canClaimTimeout}>{syncStage === 'submitting' || syncStage === 'confirming' || syncStage === 'syncing' ? 'Finishing turn…' : game.over ? 'Game over' : canClaimTimeout ? 'Claim timeout win →' : !isMyTurn() ? remotePreview ? 'Opponent move · pending' : 'Opponent’s turn' : queuedActions.length ? 'End turn →' : 'Pass →'}</button>
                 </div>
-                <div class="connection-line" role="status" aria-live="polite">{errorMsg ?? syncError ?? (busy || (syncStage === 'idle' ? queuedActions.length ? 'Plan ready' : ' ' : 'Waiting for the network…'))}</div>
+                <div class="connection-line" role="status" aria-live="polite">{errorMsg ?? syncError ?? (busy || (syncStage === 'idle' && queuedActions.length ? 'Plan ready' : ' '))}</div>
             </footer>
             <dialog class="game-sheet" bind:this={sheet} onclose={closeOverlay} oncancel={closeOverlay}>
                 <header><strong>{overlay === 'stack' ? 'Pending abilities' : overlay === 'history' ? 'Last moves' : `Game #${game.id}`}</strong><button aria-label="Close panel" onclick={closeOverlay}>✕</button></header>
@@ -1584,11 +1636,17 @@
         }
     }
 
+    .move-feedback { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:8; overflow:visible; }
+    .move-feedback ellipse { fill:none; stroke-width:0.5; transform-box:fill-box; transform-origin:center; animation:board-pulse 1s ease-out forwards; }
+    @keyframes board-pulse { from { opacity:0.9; transform:scale(0.6); } to { opacity:0; transform:scale(1.4); } }
+    @media(prefers-reduced-motion:reduce) { .move-feedback ellipse { animation:none; opacity:0.65; } }
     .wrap.playing { position:fixed; inset:0; width:100%; max-width:none; height:100dvh; min-height:0; padding:0; overflow:hidden; }
     .play-screen { height:100%; display:grid; grid-template-rows:auto minmax(0,1fr) auto; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background:radial-gradient(ellipse at center,#1c3049,#080f1d); }
     .play-hud { display:flex; align-items:center; gap:8px; padding:6px 10px; z-index:12; }
     .play-hud button,.turn-controls button { min-width:44px; border-radius:14px; }
     .turn-indicator { flex:1; font-size:13px; color:#c1ccdb; } .turn-indicator small { opacity:0.6; } .your-turn { color:#7dd3fc; } .hud-energy { color:#fde68a; font-size:14px; }
+    .play-hud button { transition:box-shadow 200ms; }
+    .play-hud button.ability-pulse { box-shadow:0 0 0 2px #c4b5fd77,0 0 16px #a78bfa55; }
     .has-effects { color:#fbbf24; border-color:#b58b46; }
     .play-stage { position:relative; min-width:0; min-height:0; display:grid; place-items:center; container-type:size; }
     .play-stage .board { width:min(96cqw,calc(96cqh * var(--w) / var(--h))); height:min(96cqh,calc(96cqw * var(--h) / var(--w))); }

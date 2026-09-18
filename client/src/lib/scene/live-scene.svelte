@@ -1,5 +1,7 @@
 <script lang="ts">
+    import type { BoardCue } from '$lib/game/motion';
     import type { PerspectiveCamera } from 'three';
+    import ActionCue from './action-cue.svelte';
     import LivePiece from './live-piece.svelte';
     import { T } from '@threlte/core';
     import { HTML, interactivity } from '@threlte/extras';
@@ -7,9 +9,9 @@
     import { goalSlot, isEnergySpace, pathDistance, type LayoutConfig } from '@caps/game-core/board';
     import type { AbilityStack, ChainCap, CapTypeDef } from '@caps/game-core/types';
 
-    let { layout, caps, viewer, definitions, selectedId, targets, focusedCells, stack, oncamera, onhover }: {
+    let { layout, caps, viewer, definitions, selectedId, targets, focusedCells, stack, cues, oncamera, onhover }: {
         viewer: number | null; layout: LayoutConfig; caps: ChainCap[]; definitions: Map<number, CapTypeDef>;
-        selectedId: number | null; targets: Map<string, string>; focusedCells: Set<string>; stack: AbilityStack;
+        selectedId: number | null; targets: Map<string, string>; focusedCells: Set<string>; stack: AbilityStack; cues: BoardCue[];
         oncamera:(camera:PerspectiveCamera)=>void; onhover:(id:number|null)=>void;
     } = $props();
     interactivity();
@@ -76,8 +78,9 @@
 
 {#each caps.filter(c => !c.dead && c.x !== null && c.y !== null) as cap (cap.id)}
     {@const p = position(cap.x!,cap.y!)}
-    <LivePiece {cap} x={p[0]} z={p[1]} selected={cap.id === selectedId} {onhover} />
+    <LivePiece {layout} {viewer} {cap} x={p[0]} z={p[1]} selected={cap.id === selectedId} {onhover} />
 {/each}
+{#each cues as cue (cue.id)}<ActionCue {cue} {layout} {viewer} />{/each}
 </T.Group>
 <style>
     .spot-mark { font:700 20px system-ui; text-shadow:0 0 8px currentColor; }
