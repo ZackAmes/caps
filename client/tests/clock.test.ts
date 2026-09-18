@@ -23,3 +23,14 @@ test('clock responses reject malformed values', () => {
         assert.throws(() => decodeClock(values));
     }
 });
+
+test('waiting freezes both displayed banks, survives refreshes, and clears on resume or a new turn', async () => {
+    const {holdClock} = await import('../src/lib/game/clock');
+    const held = holdClock(null,clock,2,false,1030,true)!;
+    assert.deepEqual(held.seconds,[70,123]);
+    assert.equal(holdClock(held,{...clock,chainTime:1040},2,false,1040,true),held);
+    assert.equal(holdClock(held,clock,2,false,1040,false),null);
+    assert.deepEqual(holdClock(held,{...clock,p1Seconds:80,runningSince:1040},3,false,1040,true)?.seconds,[80,123]);
+    assert.equal(holdClock(held,clock,2,true,1040,true),null);
+    assert.equal(holdClock(held,{...clock,gameId:2},2,false,1040,true)?.gameId,2);
+});

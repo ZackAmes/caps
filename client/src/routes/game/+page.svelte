@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { holdClock, type ClockHold } from '$lib/game/clock';
     import { clockRemaining, clockLabel, type GameClock } from '@caps/game-core/clock';
     import { boardArt, artPosition } from '$lib/game/board-art';
     import { submissionHasLanded } from '$lib/game/sync';
@@ -111,7 +112,21 @@
 
     let clockSample = $state<{clock:GameClock; receivedAt:number} | null>(null);
     let clockTick = $state(0);
-    let frozenClock = $state<[number, number] | null>(null);
+    let clockHold = $state<ClockHold | null>(null);
+    let snapshotLoadingGame = $state<number | null>(null);
+    let updateHint = $state<{gameId:number;turn:number;over:boolean;receivedAt:number} | null>(null);
+    let awaitingSnapshot = $derived(!!game && (snapshotLoadingGame === game.id || !!updateHint && updateHint.gameId === game.id &&
+        (updateHint.turn > game.turnCount || updateHint.over !== game.over) && clockTick - updateHint.receivedAt < 15000));
+    let clockWaitReason = $derived.by(() => !game || game.over ? null : committing || pendingForGame ? 'Submitting your turn' :
+        remotePreview ? 'Opponent turn pending' : awaitingSnapshot || busy ? 'Updating the board' : null);
+    let frozenClock = $derived(clockHold?.gameId === game?.id && clockHold?.turn === game?.turnCount ? clockHold?.seconds : null);
+    $effect(() => {
+        const current = game, sample = clockSample, waiting = !!clockWaitReason;
+        untrack(() => {
+            clockHold = current && sample ? holdClock(clockHold,sample.clock,current.turnCount,current.over,
+                sample.clock.chainTime + Math.max(0,performance.now()-sample.receivedAt)/1000,waiting) : null;
+        });
+    });
     let clockTimes = $derived(frozenClock ?? (clockSample && game ? clockRemaining(clockSample.clock, game.turnCount, game.over,
         clockSample.clock.chainTime + Math.max(0, clockTick - clockSample.receivedAt) / 1000) : null));
     let timedOut = $derived(!!game?.over && !!clockSample?.clock.enabled && clockSample.clock.timedOutSlot < 2);
@@ -181,7 +196,7 @@
 
     let mySlot = $derived(game ? viewerSlot(game, account) : null);
     let canClaimTimeout = $derived(!!game && !game.over && mySlot !== null && !isMyTurn() &&
-        clockTimes !== null && clockTimes[game.turnCount % 2] <= 0 && !committing && !pendingForGame && busy === null);
+        clockTimes !== null && clockTimes[game.turnCount % 2] <= 0 && !committing && !pendingForGame && !clockWaitReason && busy === null);
 
     let otherHand = $derived(game && mySlot === game.turnCount % 2 ? opponentHand : hand);
     let activeLayout = $derived<LayoutConfig>(game ? loadedLayout ?? getLayout(LAYOUT_DUEL_RING) : publishedSelection?.layout ?? getLayout(selectedLayout));
@@ -345,7 +360,7 @@
     }
 
     function canAct(): boolean {
-        return !!game && !game.over && isMyTurn() && !committing && !pendingForGame && busy === null;
+        return !!game && !game.over && isMyTurn() && !committing && !pendingForGame && !awaitingSnapshot && busy === null;
     }
 
     function benchCaps(): ChainCap[] {
@@ -667,6 +682,7 @@
 
     async function loadGame(id: number, stillCurrent: () => boolean = () => true, minimumTurn = 0) {
         const epoch = ++loadEpoch;
+        snapshotLoadingGame = id;
         try {
             if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Enter a valid game id');
             const snapshot = await deadline(getGameSnapshot(id, minimumTurn));
@@ -680,10 +696,11 @@
             onPointerCancel();
             queuedActions = []; selectedCapId = null; hoveredCapId = null; abilityTargetMode = false; stackTargetMode = false;
             capDefMap = snapshot.definitions; pendingStack = snapshot.stack;
-            loadedLayout = snapshot.layout; frozenClock = null;
+            loadedLayout = snapshot.layout;
+            if (updateHint?.gameId === id && nextGame.turnCount >= updateHint.turn && nextGame.over === updateHint.over) updateHint = null;
             hand = snapshot.hand; opponentHand = snapshot.otherHand; clockSample = snapshot.clock; game = nextGame;
             if (submissionHasLanded(pendingForGame, game.turnCount)) {
-                pendingSubmission = null; frozenClock = null; syncStage = 'idle'; submissionEpoch++;
+                pendingSubmission = null; syncStage = 'idle'; submissionEpoch++;
             }
             /* Loading an old match must not replace the new-game map preference. */ resumeId = id; gameIdInput = String(id); linkCopied = false;
             lastSynced = new Date().toLocaleTimeString(); syncError = null; errorMsg = null;
@@ -702,7 +719,7 @@
             if (!game) errorMsg = syncError;
             log(`Load: ${syncError}`, 'error');
             return false;
-        }
+        } finally { if (epoch === loadEpoch) snapshotLoadingGame = null; }
     }
 
     // Keep checking both sides: another tab may submit, and receipts can precede RPC state.
@@ -732,7 +749,7 @@
                     const receipt = await deadline(transactionState(pending.hash));
                     if (!current()) return;
                     if (receipt === 'reverted') {
-                        pendingSubmission = null; frozenClock = null; syncStage = 'idle'; submissionEpoch++;
+                        pendingSubmission = null; syncStage = 'idle'; submissionEpoch++;
                         errorMsg = 'The transaction reverted. Your plan is still here; refresh before trying again.';
                     } else if (receipt === 'confirmed') {
                         pendingSubmission = {...pending, confirmed:true}; syncStage = 'syncing';
@@ -761,6 +778,7 @@
             gameId: id,
             onGame: next => {
                 if (!current() || (next.turn <= (game?.turnCount ?? -1) && next.over === game?.over)) return;
+                updateHint = {gameId:id,turn:next.turn,over:next.over,receivedAt:performance.now()};
                 hintedTurn = Math.max(hintedTurn, next.turn); hintRetries = 0; scheduleCheck();
             },
             onIntent: model => {
@@ -781,12 +799,10 @@
     async function commitTurn(claim = false) {
         if (!game || (claim ? !canClaimTimeout : !canAct())) return;
         const id = game.id, turn = game.turnCount, attempt = ++submissionEpoch;
-        frozenClock = clockTimes ? [...clockTimes] as [number, number] : null;
         errorMsg = null; syncError = null; committing = true; syncStage = 'submitting';
         try {
             const progress: TransactionProgress = (stage, hash) => {
                 if (attempt !== submissionEpoch) return;
-                if (!frozenClock && clockTimes) frozenClock = [...clockTimes] as [number, number];
                 pendingSubmission = {gameId:id,turn,hash,confirmed:stage === 'syncing'};
                 syncStage = stage;
             };
@@ -794,7 +810,7 @@
             await loadGame(id, () => game?.id === id, turn + 1);
         } catch (error) {
             syncError = error instanceof Error ? error.message : String(error);
-            if (!pendingSubmission) { frozenClock = null; errorMsg = syncError; syncStage = 'idle'; }
+            if (!pendingSubmission) { errorMsg = syncError; syncStage = 'idle'; }
         } finally { committing = false; }
     }
 
@@ -852,12 +868,12 @@
         <section class="play-screen" aria-label="CAPS game">
             <div class="play-top"><header class="play-hud">
                 <button aria-label="Game menu" onclick={() => overlay = 'menu'}>☰</button>
-                <span title={frozenClock ? "Clock display paused while confirming; chain time is authoritative" : ""} class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : remotePreview ? 'Move pending' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
+                <span title={clockWaitReason ? `Clock display paused: ${clockWaitReason}. Onchain timing still applies.` : ""} class="turn-indicator" class:your-turn={isMyTurn()}>{isSolo ? `P${game.turnCount % 2 + 1}` : isMyTurn() ? 'Your turn' : remotePreview ? 'Move pending' : 'Opponent'} <small>· {game.turnCount + 1}</small></span>
                 <span class="hud-energy" title="Your energy">⚡ {isMyTurn() ? remainingEnergy : mySlot === 0 ? game.p1Energy : game.p2Energy}</span>
                 <button class:ability-pulse={visualCues.some(c => c.kind === 'ability' || c.kind === 'negate' || c.kind === 'resolve')} class:has-effects={!!displayedStack.entries.length} aria-label={`Ability stack: ${displayedStack.entries.length} effects`} onclick={() => overlay = 'stack'}>◷ {displayedStack.entries.length}</button>
                 <button aria-label="Opponent moves and turn history" onclick={() => overlay = 'history'}>↶</button>
             </header>
-            <div class="clock-strip" aria-label={frozenClock ? "Game clocks paused on screen while confirming" : "Game clocks: two minutes plus ten seconds per turn"}>
+            <div class="clock-strip" aria-label={clockWaitReason ? `Clock displays paused: ${clockWaitReason}` : "Game clocks: two minutes plus ten seconds per turn"} title={clockWaitReason ?? undefined}>
                 {#each [mySlot ?? 0, 1 - (mySlot ?? 0)] as slot}
                     <span class:running={!frozenClock && !game.over && game.turnCount % 2 === slot} class:low={clockTimes !== null && clockTimes[slot] < 20}>
                         <small>{frozenClock ? '⏸ ' : ''}{isSolo || mySlot === null ? `P${slot + 1}` : slot === mySlot ? 'You' : 'Opponent'}</small>
@@ -1021,7 +1037,7 @@
                     <span class="action-dots" aria-label={`${preview?.actions ?? 1} normal actions and ${preview?.moves ?? 0} bonus moves remaining`}>{(preview?.actions ?? 1) ? '●' : '○'}{(preview?.moves ?? 0) > 0 ? ` +${preview?.moves}` : ''}</span>
                     <button class="submit-turn" onclick={() => commitTurn(canClaimTimeout)} disabled={!canAct() && !canClaimTimeout}>{syncStage === 'submitting' || syncStage === 'confirming' || syncStage === 'syncing' ? 'Finishing turn…' : game.over ? 'Game over' : canClaimTimeout ? 'Claim timeout win →' : !isMyTurn() ? remotePreview ? 'Opponent move · pending' : 'Opponent’s turn' : queuedActions.length ? 'End turn →' : 'Pass →'}</button>
                 </div>
-                <div class="connection-line" role="status" aria-live="polite">{errorMsg ?? syncError ?? (busy || (syncStage === 'idle' && queuedActions.length ? 'Plan ready' : ' '))}</div>
+                <div class="connection-line" role="status" aria-live="polite">{errorMsg ?? syncError ?? (clockWaitReason ? `${clockWaitReason} · clocks paused on screen` : busy || (syncStage === 'idle' && queuedActions.length ? 'Plan ready' : ' '))}</div>
             </footer>
             <dialog class="game-sheet" bind:this={sheet} onclose={closeOverlay} oncancel={closeOverlay}>
                 <header><strong>{overlay === 'stack' ? 'Pending abilities' : overlay === 'history' ? 'Last moves' : `Game #${game.id}`}</strong><button aria-label="Close panel" onclick={closeOverlay}>✕</button></header>

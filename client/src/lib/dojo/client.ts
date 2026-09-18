@@ -53,7 +53,7 @@ async function executeAndWait(call: Call, progress?: TransactionProgress): Promi
     throw new Error("No transaction hash returned from Controller");
   }
   progress?.('confirming', res.transaction_hash);
-  const receipt = await provider.waitForTransaction(res.transaction_hash);
+  const receipt = await provider.waitForTransaction(res.transaction_hash, {retryInterval:1000});
   if (!receipt.isSuccess()) throw new Error('Transaction reverted');
   progress?.('syncing', res.transaction_hash);
   return res.transaction_hash;
